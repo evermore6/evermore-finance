@@ -1,3 +1,4 @@
+import { forwardRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { X } from 'lucide-react'
 
@@ -17,10 +18,10 @@ export function Button({
   }
 
   const sizes = {
-    sm: 'px-3 py-1.5 text-xs',
-    md: 'px-4 py-2 text-sm',
-    lg: 'px-6 py-3 text-base',
-    xl: 'px-8 py-4 text-lg',
+    sm:   'px-3 py-1.5 text-xs',
+    md:   'px-4 py-2 text-sm',
+    lg:   'px-6 py-3 text-base',
+    xl:   'px-8 py-4 text-lg',
     icon: 'p-2',
   }
 
@@ -89,10 +90,11 @@ export function ProgressBar({ value, max = 100, showLabel = false, className = '
 }
 
 // ── Input ─────────────────────────────────────────────────
-export function Input({
-  label, error, hint, icon: Icon, suffix,
-  className = '', wrapperClass = '', ...props
-}) {
+// Uses forwardRef so react-hook-form's register() ref reaches the native <input>
+export const Input = forwardRef(function Input(
+  { label, error, hint, icon: Icon, suffix, className = '', wrapperClass = '', ...props },
+  ref
+) {
   return (
     <div className={`flex flex-col gap-1.5 ${wrapperClass}`}>
       {label && (
@@ -107,6 +109,7 @@ export function Input({
           </div>
         )}
         <input
+          ref={ref}
           className={`
             w-full rounded-xl border border-warmgray-200 dark:border-warmgray-700
             bg-white/60 dark:bg-warmgray-900/40
@@ -129,10 +132,14 @@ export function Input({
       {hint && !error && <p className="text-xs text-warmgray-400">{hint}</p>}
     </div>
   )
-}
+})
 
 // ── Select ────────────────────────────────────────────────
-export function Select({ label, error, options = [], className = '', wrapperClass = '', ...props }) {
+// Uses forwardRef so react-hook-form's register() ref reaches the native <select>
+export const Select = forwardRef(function Select(
+  { label, error, options = [], className = '', wrapperClass = '', ...props },
+  ref
+) {
   return (
     <div className={`flex flex-col gap-1.5 ${wrapperClass}`}>
       {label && (
@@ -141,6 +148,7 @@ export function Select({ label, error, options = [], className = '', wrapperClas
         </label>
       )}
       <select
+        ref={ref}
         className={`
           w-full rounded-xl border border-warmgray-200 dark:border-warmgray-700
           bg-white/60 dark:bg-warmgray-900/40
@@ -161,10 +169,14 @@ export function Select({ label, error, options = [], className = '', wrapperClas
       {error && <p className="text-xs text-red-500">{error}</p>}
     </div>
   )
-}
+})
 
 // ── Textarea ──────────────────────────────────────────────
-export function Textarea({ label, error, className = '', wrapperClass = '', ...props }) {
+// Uses forwardRef so react-hook-form's register() ref reaches the native <textarea>
+export const Textarea = forwardRef(function Textarea(
+  { label, error, className = '', wrapperClass = '', ...props },
+  ref
+) {
   return (
     <div className={`flex flex-col gap-1.5 ${wrapperClass}`}>
       {label && (
@@ -173,6 +185,7 @@ export function Textarea({ label, error, className = '', wrapperClass = '', ...p
         </label>
       )}
       <textarea
+        ref={ref}
         className={`
           w-full rounded-xl border border-warmgray-200 dark:border-warmgray-700
           bg-white/60 dark:bg-warmgray-900/40
@@ -188,7 +201,7 @@ export function Textarea({ label, error, className = '', wrapperClass = '', ...p
       {error && <p className="text-xs text-red-500">{error}</p>}
     </div>
   )
-}
+})
 
 // ── Toggle ────────────────────────────────────────────────
 export function Toggle({ checked, onChange, label, size = 'md' }) {
@@ -215,10 +228,10 @@ export function Toggle({ checked, onChange, label, size = 'md' }) {
 // ── Modal ─────────────────────────────────────────────────
 export function Modal({ open, onClose, title, children, size = 'md', footer }) {
   const sizes = {
-    sm:  'max-w-sm',
-    md:  'max-w-md',
-    lg:  'max-w-lg',
-    xl:  'max-w-xl',
+    sm:    'max-w-sm',
+    md:    'max-w-md',
+    lg:    'max-w-lg',
+    xl:    'max-w-xl',
     '2xl': 'max-w-2xl',
   }
   return (
@@ -291,7 +304,7 @@ export function Skeleton({ className = '' }) {
 
 // ── Amount Display ────────────────────────────────────────
 export function AmountText({ amount, type, className = '' }) {
-  const cls = type === 'income' ? 'amount-income' : 'amount-expense'
+  const cls    = type === 'income' ? 'amount-income' : 'amount-expense'
   const prefix = type === 'income' ? '+' : '-'
   return (
     <span className={`font-mono font-medium ${cls} ${className}`}>
