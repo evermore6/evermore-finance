@@ -7,9 +7,10 @@ import { formatCurrency, formatCompact } from '@/utils'
 
 // ── Konstanta ikon & warna wallet ─────────────────────────
 export const WALLET_TYPES = [
-  { id: 'cash',    label: 'Cash',    icon: '💵' },
-  { id: 'bank',    label: 'Bank',    icon: '🏦' },
-  { id: 'ewallet', label: 'E-Wallet', icon: '📱' },
+  { id: 'cash',       label: 'Cash',       icon: '💵' },
+  { id: 'bank',       label: 'Bank',       icon: '🏦' },
+  { id: 'ewallet',    label: 'E-Wallet',   icon: '📱' },
+  { id: 'investment', label: 'Investasi',  icon: '📈' },
 ]
 
 export const WALLET_ICONS = ['💵','🏦','📱','💳','💰','🏧','🛍️','🟢','🔵','⚡']
@@ -136,6 +137,9 @@ export function WalletCard({ wallet: w, onEdit, onDelete, txnCount = 0 }) {
         {formatCurrency(w.balance)}
       </p>
       <p className="text-xs text-[var(--text-muted)]">{txnCount} transaksi tercatat</p>
+      {w.type === 'investment' && (
+        <p className="text-[10px] text-amber-500 mt-1">📈 Saldo diupdate manual</p>
+      )}
     </motion.div>
   )
 }

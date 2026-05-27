@@ -46,6 +46,10 @@ export const transactionService = {
     return supabase.from('transactions').insert(data).select().single()
   },
 
+  async createBatch(rows) {
+    return supabase.from('transactions').insert(rows).select()
+  },
+
   async update(id, data) {
     return supabase.from('transactions').update(data).eq('id', id).select().single()
   },

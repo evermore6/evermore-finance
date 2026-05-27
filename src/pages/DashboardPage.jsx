@@ -1,219 +1,124 @@
-import { useState, useMemo } from "react";
-import { motion } from "framer-motion";
-import { Plus, Download } from "lucide-react";
-import { useNavigate } from "react-router-dom";
-import {
-  useTransactions,
-  useAllTransactions,
-  useBudgets,
-  useWallets,
-} from "@/hooks";
-import {
-  BalanceSummary,
-  MonthlyChart,
-  CategoryChart,
-  RecentTransactions,
-  AIInsights,
-} from "@/components/dashboard";
-import { WalletSummary } from "@/components/wallets";
-import { TransactionForm } from "@/components/transactions/TransactionForm";
-import { Modal, Button, Card } from "@/components/ui";
-import { PageHeader } from "@/components/layout/Header";
-import { generateInsights, getMonthsRange } from "@/utils";
-import { getCategoryById } from "@/constants/categories";
-import { exportToCSV } from "@/utils/exportUtils";
-import { useAuth } from "@/context/AuthContext";
-import toast from "react-hot-toast";
+import { useState, useMemo } from 'react'
+import { motion } from 'framer-motion'
+import { Plus, Download } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { useTransactions, useAllTransactions, useBudgets, useWallets, useSavingsGoals, useCustomCategories } from '@/hooks'
+import { BalanceSummary, MonthlyChart, CategoryChart, RecentTransactions, AIInsights } from '@/components/dashboard'
+import { WalletSummary } from '@/components/wallets'
+import { QuickAddModal } from '@/components/transactions/QuickAddModal'
+import { Button, Card } from '@/components/ui'
+import { PageHeader } from '@/components/layout/Header'
+import { generateInsights, getMonthsRange } from '@/utils'
+import { getCategoryById } from '@/constants/categories'
+import { exportToCSV } from '@/utils/exportUtils'
+import { useAuth } from '@/context/AuthContext'
+import toast from 'react-hot-toast'
 
 export default function DashboardPage() {
-  const { user } = useAuth();
-  const navigate = useNavigate();
-  const now = new Date();
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [addLoading, setAddLoading] = useState(false);
+  const { user }   = useAuth()
+  const navigate   = useNavigate()
+  const now        = new Date()
+  const [showAdd, setShowAdd]       = useState(false)
+  const [addLoading, setAddLoading] = useState(false)
 
   const { transactions, income, expense, loading, addTransaction } =
-    useTransactions({ year: now.getFullYear(), month: now.getMonth() });
+    useTransactions({ year: now.getFullYear(), month: now.getMonth() })
 
-  const { transactions: allTxns } = useAllTransactions();
-  const { budgets } = useBudgets();
-  const {
-    wallets,
-    totalBalance,
-    loading: walletsLoading,
-    refetch: refetchWallets,
-  } = useWallets();
+  const { transactions: allTxns } = useAllTransactions()
+  const { budgets }                = useBudgets()
+  const { goals }                  = useSavingsGoals()
+  const { categories: customCats } = useCustomCategories()
+  const { wallets, totalBalance, loading: walletsLoading, applyBalanceDelta } = useWallets()
 
-  // Wallet updater — sinkronisasi state lokal setelah transaksi
-  const walletUpdater = (walletId, delta) => {
-    // refetchWallets() akan pull data terbaru dari DB
-    refetchWallets();
-  };
-
-  // Monthly trend data (last 6 months)
   const monthlyChartData = useMemo(() => {
-    const months = getMonthsRange(6);
-    return months.map(({ year, month, label }) => {
-      const filtered = allTxns.filter((t) => {
-        const d = new Date(t.date);
-        return d.getFullYear() === year && d.getMonth() === month;
-      });
+    return getMonthsRange(6).map(({ year, month, label }) => {
+      const f = allTxns.filter(t => {
+        const d = new Date(t.date)
+        return d.getFullYear() === year && d.getMonth() === month && t.transaction_subtype === 'regular'
+      })
       return {
         label,
-        income: filtered
-          .filter((t) => t.type === "income")
-          .reduce((s, t) => s + t.amount, 0),
-        expense: filtered
-          .filter((t) => t.type === "expense")
-          .reduce((s, t) => s + t.amount, 0),
-      };
-    });
-  }, [allTxns]);
+        income:  f.filter(t => t.type === 'income').reduce((s,t) => s + t.amount, 0),
+        expense: f.filter(t => t.type === 'expense').reduce((s,t) => s + t.amount, 0),
+      }
+    })
+  }, [allTxns])
 
-  // Category pie data
   const categoryData = useMemo(() => {
-    const map = {};
-    transactions
-      .filter((t) => t.type === "expense")
-      .forEach((t) => {
-        map[t.category] = (map[t.category] || 0) + t.amount;
-      });
+    const map = {}
+    transactions.filter(t => t.type === 'expense' && t.transaction_subtype === 'regular').forEach(t => {
+      map[t.category] = (map[t.category] || 0) + t.amount
+    })
     return Object.entries(map)
-      .map(([id, value]) => {
-        const cat = getCategoryById(id);
-        return {
-          name: cat?.label || id,
-          value,
-          color: cat?.color || "#a3b18a",
-        };
-      })
-      .sort((a, b) => b.value - a.value)
-      .slice(0, 6);
-  }, [transactions]);
+      .map(([id, value]) => { const cat = getCategoryById(id); return { name: cat?.label || id, value, color: cat?.color || '#a3b18a' } })
+      .sort((a,b) => b.value - a.value).slice(0, 6)
+  }, [transactions])
 
-  // AI insights
-  const insights = useMemo(
-    () => generateInsights(allTxns, budgets),
-    [allTxns, budgets],
-  );
+  const insights = useMemo(() => generateInsights(allTxns, budgets), [allTxns, budgets])
 
-  const handleAddTransaction = async (data) => {
-    setAddLoading(true);
-    const { error } = await addTransaction(data, walletUpdater);
-    setAddLoading(false);
-    if (!error) setShowAddModal(false);
-  };
+  const handleAdd = async (data) => {
+    setAddLoading(true)
+    const { error } = await addTransaction(data, applyBalanceDelta)
+    setAddLoading(false)
+    if (!error) setShowAdd(false)
+  }
 
-  const handleExport = () => {
-    if (!transactions.length) {
-      toast.error("No transactions this month");
-      return;
-    }
-    exportToCSV(
-      transactions,
-      `evermore-${now.getFullYear()}-${now.getMonth() + 1}`,
-    );
-    toast.success("Exported to CSV!");
-  };
-
-  const greeting = () => {
-    const h = now.getHours();
-    if (h < 12) return "Good morning";
-    if (h < 17) return "Good afternoon";
-    return "Good evening";
-  };
-
-  const name = user?.user_metadata?.full_name?.split(" ")[0] || "there";
+  const name = user?.user_metadata?.full_name?.split(' ')[0] || 'there'
+  const h = now.getHours()
+  const greeting = h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'
 
   return (
     <div className="space-y-6">
       <PageHeader
-        title={`${greeting()}, ${name} 🌿`}
-        subtitle={now.toLocaleDateString("id-ID", {
-          weekday: "long",
-          day: "numeric",
-          month: "long",
-          year: "numeric",
-        })}
+        title={`${greeting}, ${name} 🌿`}
+        subtitle={now.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
         action={
           <div className="flex items-center gap-2">
-            <Button
-              variant="secondary"
-              size="sm"
-              icon={Download}
-              onClick={handleExport}
-            >
+            <Button variant="secondary" size="sm" icon={Download}
+              onClick={() => { if (!transactions.length) { toast.error('No transactions'); return } exportToCSV(transactions, `evermore-${now.getFullYear()}-${now.getMonth()+1}`); toast.success('Exported!') }}>
               Export
             </Button>
-            <Button
-              variant="primary"
-              size="sm"
-              icon={Plus}
-              onClick={() => setShowAddModal(true)}
-            >
-              Add Transaction
+            <Button variant="primary" size="sm" icon={Plus} onClick={() => setShowAdd(true)}>
+              Add
             </Button>
           </div>
         }
       />
 
-      {/* Balance Summary */}
       <BalanceSummary income={income} expense={expense} loading={loading} />
 
-      {/* Charts Row */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <div className="lg:col-span-2">
-          <MonthlyChart data={monthlyChartData} />
-        </div>
+        <div className="lg:col-span-2"><MonthlyChart data={monthlyChartData} /></div>
         <div>
-          {categoryData.length > 0 ? (
-            <CategoryChart data={categoryData} />
-          ) : (
-            <Card className="h-full flex items-center justify-center">
-              <p className="text-sm text-[var(--text-muted)] text-center">
-                No expense data this month
-              </p>
-            </Card>
-          )}
+          {categoryData.length > 0
+            ? <CategoryChart data={categoryData} />
+            : <Card className="h-full flex items-center justify-center"><p className="text-sm text-[var(--text-muted)] text-center">No expense data</p></Card>
+          }
         </div>
       </div>
 
-      {/* Wallet Summary + Insights */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <WalletSummary
-          wallets={wallets}
-          totalBalance={totalBalance}
-          loading={walletsLoading}
-          onNavigate={() => navigate("/wallets")}
-        />
+        <WalletSummary wallets={wallets} totalBalance={totalBalance} loading={walletsLoading} onNavigate={() => navigate('/wallets')} />
         <AIInsights insights={insights} />
       </div>
 
-      {/* Recent Transactions */}
       <RecentTransactions transactions={transactions} loading={loading} />
 
       {/* FAB mobile */}
-      <motion.button
-        whileTap={{ scale: 0.93 }}
-        onClick={() => setShowAddModal(true)}
-        className="md:hidden fixed bottom-20 right-4 w-14 h-14 rounded-2xl bg-gradient-sage shadow-soft-md flex items-center justify-center text-white z-40"
-      >
+      <motion.button whileTap={{ scale: 0.93 }} onClick={() => setShowAdd(true)}
+        className="md:hidden fixed bottom-20 right-4 w-14 h-14 rounded-2xl bg-gradient-sage shadow-soft-md flex items-center justify-center text-white z-40">
         <Plus size={24} />
       </motion.button>
 
-      {/* Add Transaction Modal */}
-      <Modal
-        open={showAddModal}
-        onClose={() => setShowAddModal(false)}
-        title="Add Transaction"
-        size="md"
-      >
-        <TransactionForm
-          onSubmit={handleAddTransaction}
-          loading={addLoading}
-          wallets={wallets}
-        />
-      </Modal>
+      <QuickAddModal
+        open={showAdd}
+        onClose={() => setShowAdd(false)}
+        wallets={wallets}
+        savingGoals={goals}
+        customCategories={customCats}
+        onSubmit={handleAdd}
+        loading={addLoading}
+      />
     </div>
-  );
+  )
 }

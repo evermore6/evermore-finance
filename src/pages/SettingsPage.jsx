@@ -6,7 +6,7 @@ import {
 } from 'lucide-react'
 import { useAuth } from '@/context/AuthContext'
 import { useTheme } from '@/context/ThemeContext'
-import { useRecurringTemplates, useAllTransactions } from '@/hooks'
+import { useRecurringTemplates, useAllTransactions, useCustomCategories } from '@/hooks'
 import { Button, Card, Modal, Toggle, Badge } from '@/components/ui'
 import { PageHeader } from '@/components/layout/Header'
 import { formatCurrency, formatDate } from '@/utils'
@@ -23,6 +23,12 @@ export default function SettingsPage() {
   const { templates, loading: templatesLoading, updateTemplate, deleteTemplate } = useRecurringTemplates()
   const { transactions } = useAllTransactions()
   const navigate = useNavigate()
+  const { categories: customCats, addCategory, deleteCategory } = useCustomCategories()
+  const [showAddCat, setShowAddCat] = useState(false)
+  const [newCatName,  setNewCatName]  = useState('')
+  const [newCatIcon,  setNewCatIcon]  = useState('📦')
+  const [newCatColor, setNewCatColor] = useState('#a3b18a')
+  const [newCatType,  setNewCatType]  = useState('expense')
   const fileRef = useRef()
 
   const [editName, setEditName]   = useState(false)
@@ -213,6 +219,35 @@ export default function SettingsPage() {
         )}
       </Section>
 
+      {/* Custom Categories */}
+      <Section title={`Custom Categories (${customCats.length})`}>
+        <div className="px-5 py-3 border-b border-[var(--border)]">
+          <p className="text-xs text-[var(--text-muted)] mb-3">Tambah kategori sendiri untuk income atau expense</p>
+          <button
+            onClick={() => setShowAddCat(true)}
+            className="flex items-center gap-2 text-sm text-sage-600 dark:text-sage-300 font-medium hover:underline"
+          >
+            + Tambah Kategori
+          </button>
+        </div>
+        {customCats.length === 0 ? (
+          <div className="px-5 py-4 text-sm text-[var(--text-muted)]">Belum ada kategori custom</div>
+        ) : (
+          customCats.map(c => (
+            <div key={c.id} className="flex items-center gap-3 px-5 py-3 border-b border-[var(--border)] last:border-0">
+              <span className="text-lg">{c.icon}</span>
+              <div className="flex-1">
+                <p className="text-sm font-medium text-[var(--text-primary)]">{c.name}</p>
+                <p className="text-xs text-[var(--text-muted)] capitalize">{c.type}</p>
+              </div>
+              <button onClick={() => deleteCategory(c.id)} className="p-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 text-warmgray-400 hover:text-red-500 transition-colors">
+                <Trash2 size={13} />
+              </button>
+            </div>
+          ))
+        )}
+      </Section>
+
       {/* Danger Zone */}
       <Section title="Account">
         <Row
@@ -276,6 +311,48 @@ export default function SettingsPage() {
         }
       >
         <p className="text-sm text-[var(--text-secondary)]">Stop generating this recurring transaction? Past transactions will not be deleted.</p>
+      </Modal>
+
+      {/* Add Custom Category Modal */}
+      <Modal open={showAddCat} onClose={() => setShowAddCat(false)} title="Tambah Kategori" size="sm"
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setShowAddCat(false)}>Batal</Button>
+            <Button variant="primary" onClick={async () => {
+              if (!newCatName.trim()) return
+              await addCategory({ name: newCatName.trim(), icon: newCatIcon, color: newCatColor, type: newCatType })
+              setNewCatName(''); setShowAddCat(false)
+            }}>Simpan</Button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <div className="flex gap-2">
+            {['expense','income'].map(t => (
+              <button key={t} type="button" onClick={() => setNewCatType(t)}
+                className={`flex-1 py-2 rounded-xl text-sm font-medium border transition-all capitalize
+                  ${newCatType === t ? 'bg-sage-100 dark:bg-sage-900/30 border-sage-300 text-sage-700 dark:text-sage-300' : 'border-warmgray-200 dark:border-warmgray-700 text-warmgray-500'}`}>
+                {t}
+              </button>
+            ))}
+          </div>
+          <div>
+            <label className="text-sm font-medium text-warmgray-600 dark:text-warmgray-300 block mb-1.5">Nama Kategori</label>
+            <input value={newCatName} onChange={e => setNewCatName(e.target.value)} placeholder="Nama kategori…"
+              className="w-full px-3.5 py-2.5 rounded-xl border border-warmgray-200 dark:border-warmgray-700 bg-white/60 dark:bg-warmgray-900/40 text-sm focus:outline-none focus:border-sage-400" />
+          </div>
+          <div>
+            <label className="text-sm font-medium text-warmgray-600 dark:text-warmgray-300 block mb-1.5">Icon</label>
+            <div className="flex flex-wrap gap-1.5">
+              {['📦','🎮','🐶','🌺','📷','🎵','⚽','🍕','🚀','💊','🏋️','✈️','🎭','📚','🛒'].map(em => (
+                <button key={em} type="button" onClick={() => setNewCatIcon(em)}
+                  className={`w-9 h-9 rounded-xl text-xl flex items-center justify-center transition-all ${newCatIcon === em ? 'bg-sage-100 dark:bg-sage-900/30 ring-2 ring-sage-400' : 'hover:bg-warmgray-50 dark:hover:bg-warmgray-800'}`}>
+                  {em}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
       </Modal>
 
       <p className="text-xs text-center text-[var(--text-muted)] pb-4">
