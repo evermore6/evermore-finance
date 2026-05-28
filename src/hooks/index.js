@@ -3,6 +3,7 @@ import { useAuth } from '@/context/AuthContext'
 import { transactionService } from '@/services/transactionService'
 import { debtService, budgetService, savingsService } from '@/services/index'
 import { walletService, customCategoryService } from '@/services/walletService'
+import { budgetItemService } from '@/services/index'
 import toast from 'react-hot-toast'
 
 // ── useWallets ────────────────────────────────────────────
@@ -122,22 +123,27 @@ export function useTransactions({ year, month, filters = {} } = {}) {
           applyBalanceDelta(to_wallet_id,   amount)
         }
 
-        // Simpan 2 transaksi yang linked (untuk history)
+        // Simpan transaksi yang linked (untuk history)
         const transferId = crypto.randomUUID()
-        const outTxn = {
+        const batchRows = []
+
+        // Transaksi keluar (amount saja, tanpa admin fee)
+        batchRows.push({
           user_id:             user.id,
           type:                'expense',
           transaction_subtype: subtype,
-          category:            subtype === 'topup' ? 'transfer' : 'transfer',
-          amount:              amount + admin_fee,
+          category:            'transfer',
+          amount,
           admin_fee,
           wallet_id:           from_wallet_id,
           to_wallet_id,
           transfer_id:         transferId,
           description:         description || (subtype === 'topup' ? 'Top Up' : 'Transfer'),
           date,
-        }
-        const inTxn = {
+        })
+
+        // Transaksi masuk ke wallet tujuan
+        batchRows.push({
           user_id:             user.id,
           type:                'income',
           transaction_subtype: subtype,
@@ -147,9 +153,24 @@ export function useTransactions({ year, month, filters = {} } = {}) {
           transfer_id:         transferId,
           description:         description || (subtype === 'topup' ? 'Top Up diterima' : 'Transfer diterima'),
           date,
+        })
+
+        // ── AUTO: Admin fee → expense terpisah jika > 0 ───
+        if (admin_fee > 0) {
+          batchRows.push({
+            user_id:             user.id,
+            type:                'expense',
+            transaction_subtype: 'regular',
+            category:            'admin_fee',
+            amount:              admin_fee,
+            wallet_id:           from_wallet_id,
+            description:         `Biaya admin ${subtype === 'topup' ? 'top up' : 'transfer'}`,
+            date,
+          })
+          // Tidak perlu adjustBalance lagi — sudah termasuk di walletService.transfer
         }
 
-        const { data: rows } = await transactionService.createBatch([outTxn, inTxn])
+        const { data: rows } = await transactionService.createBatch(batchRows)
         if (rows) setTransactions(prev => [...rows, ...prev])
         toast.success(subtype === 'topup' ? 'Top Up berhasil!' : 'Transfer berhasil!')
         return { data: rows }
@@ -397,6 +418,55 @@ export function useBudgets(year, month) {
   return { budgets, loading, upsertBudget, deleteBudget }
 }
 
+// ── useBudgetItems ───────────────────────────────────────
+export function useBudgetItems(budgetId) {
+  const { user } = useAuth()
+  const [items, setItems]     = useState([])
+  const [loading, setLoading] = useState(false)
+
+  const fetch = useCallback(async () => {
+    if (!budgetId) { setItems([]); return }
+    setLoading(true)
+    const { data } = await budgetItemService.getByBudget(budgetId)
+    setItems(data || [])
+    setLoading(false)
+  }, [budgetId])
+
+  useEffect(() => { fetch() }, [fetch])
+
+  const addItem = async (data) => {
+    const payload = { ...data, budget_id: budgetId, user_id: user.id, sort_order: items.length }
+    const { data: item, error } = await budgetItemService.create(payload)
+    if (!error) setItems(p => [...p, item])
+    else toast.error(error.message)
+    return { data: item, error }
+  }
+
+  const updateItem = async (id, data) => {
+    const { data: item, error } = await budgetItemService.update(id, data)
+    if (!error) setItems(p => p.map(x => x.id === id ? item : x))
+    else toast.error(error.message)
+    return { data: item, error }
+  }
+
+  const toggleItem = async (id, currentState) => {
+    const { data: item, error } = await budgetItemService.toggleCheck(id, currentState)
+    if (!error) setItems(p => p.map(x => x.id === id ? item : x))
+    else toast.error(error.message)
+  }
+
+  const deleteItem = async (id) => {
+    const { error } = await budgetItemService.delete(id)
+    if (!error) setItems(p => p.filter(x => x.id !== id))
+    else toast.error(error.message)
+  }
+
+  const totalAllocated = items.reduce((s, i) => s + (i.amount || 0), 0)
+  const totalChecked   = items.filter(i => i.is_checked).reduce((s, i) => s + (i.amount || 0), 0)
+
+  return { items, loading, totalAllocated, totalChecked, addItem, updateItem, toggleItem, deleteItem, refetch: fetch }
+}
+
 // ── useSavingsGoals ───────────────────────────────────────
 export function useSavingsGoals() {
   const { user } = useAuth()
@@ -447,8 +517,28 @@ export function useRecurringTemplates() {
 // ── helpers ───────────────────────────────────────────────
 function computeNextDue(from, frequency) {
   const d = new Date(from)
-  if (frequency === 'weekly')  d.setDate(d.getDate() + 7)
-  if (frequency === 'monthly') d.setMonth(d.getMonth() + 1)
-  if (frequency === 'yearly')  d.setFullYear(d.getFullYear() + 1)
+  const originalDay = d.getDate()  // simpan tanggal asal (misal 31)
+
+  if (frequency === 'weekly') {
+    d.setDate(d.getDate() + 7)
+  } else if (frequency === 'monthly') {
+    // Pindah ke bulan berikutnya
+    const nextMonth = d.getMonth() + 1
+    const nextYear  = nextMonth > 11 ? d.getFullYear() + 1 : d.getFullYear()
+    const clampedMonth = nextMonth % 12
+    // Cari hari terakhir bulan tujuan
+    const lastDayOfNextMonth = new Date(nextYear, clampedMonth + 1, 0).getDate()
+    // Pakai originalDay atau hari terakhir bulan (mana yang lebih kecil)
+    d.setFullYear(nextYear)
+    d.setMonth(clampedMonth)
+    d.setDate(Math.min(originalDay, lastDayOfNextMonth))
+  } else if (frequency === 'yearly') {
+    const nextYear = d.getFullYear() + 1
+    // Handle 29 Feb → 28 Feb kalau tahun bukan leap year
+    const lastDayOfMonth = new Date(nextYear, d.getMonth() + 1, 0).getDate()
+    d.setFullYear(nextYear)
+    d.setDate(Math.min(originalDay, lastDayOfMonth))
+  }
+
   return d.toISOString().split('T')[0]
 }

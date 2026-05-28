@@ -9,6 +9,7 @@ export const EXPENSE_CATEGORIES = [
   { id: 'healthcare',     label: 'Healthcare',        icon: '🏥', color: '#70b870' },
   { id: 'transfer',       label: 'Transfer',          icon: '↔️', color: '#9090a0' },
   { id: 'utilities',      label: 'Utilities',         icon: '💡', color: '#c8a048' },
+  { id: 'admin_fee',      label: 'Admin Fee',         icon: '🏷️', color: '#b07050' },
   { id: 'misc',           label: 'Misc',              icon: '📦', color: '#a0a0a0' },
 ]
 
@@ -31,13 +32,13 @@ export const getCategoriesByType = (type) =>
   type === 'expense' ? EXPENSE_CATEGORIES : INCOME_CATEGORIES
 
 export const PAYMENT_METHODS = [
-  { id: 'cash',          label: 'Cash',           icon: '💵' },
-  { id: 'debit_card',    label: 'Debit Card',      icon: '💳' },
-  { id: 'credit_card',   label: 'Credit Card',     icon: '💳' },
-  { id: 'bank_transfer', label: 'Bank Transfer',   icon: '🏦' },
-  { id: 'ewallet',       label: 'E-Wallet',        icon: '📱' },
-  { id: 'qris',          label: 'QRIS',            icon: '📲' },
-  { id: 'other',         label: 'Other',           icon: '💰' },
+  { id: 'cash',          label: 'Cash',         icon: '💵' },
+  { id: 'debit_card',    label: 'Debit Card',   icon: '💳' },
+  { id: 'credit_card',   label: 'Credit Card',  icon: '💳' },
+  { id: 'bank_transfer', label: 'Bank Transfer',icon: '🏦' },
+  { id: 'ewallet',       label: 'E-Wallet',     icon: '📱' },
+  { id: 'qris',          label: 'QRIS',         icon: '📲' },
+  { id: 'other',         label: 'Other',        icon: '💰' },
 ]
 
 export const RECURRING_FREQUENCIES = [

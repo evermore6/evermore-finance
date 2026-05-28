@@ -75,3 +75,49 @@ export const savingsService = {
     return supabase.from('savings_goals').delete().eq('id', id)
   },
 }
+
+// ── Budget Items Service ──────────────────────────────────
+export const budgetItemService = {
+  async getByBudget(budgetId) {
+    return supabase
+      .from('budget_items')
+      .select('*')
+      .eq('budget_id', budgetId)
+      .order('sort_order', { ascending: true })
+  },
+
+  async getAllByUser(userId, year, month) {
+    // Join dengan budgets untuk filter by period
+    return supabase
+      .from('budget_items')
+      .select('*, budgets!inner(category, year, month)')
+      .eq('user_id', userId)
+      .eq('budgets.year', year)
+      .eq('budgets.month', month)
+  },
+
+  async create(data) {
+    return supabase.from('budget_items').insert(data).select().single()
+  },
+
+  async update(id, data) {
+    return supabase.from('budget_items').update(data).eq('id', id).select().single()
+  },
+
+  async toggleCheck(id, currentState) {
+    return supabase
+      .from('budget_items')
+      .update({ is_checked: !currentState })
+      .eq('id', id)
+      .select()
+      .single()
+  },
+
+  async delete(id) {
+    return supabase.from('budget_items').delete().eq('id', id)
+  },
+
+  async deleteByBudget(budgetId) {
+    return supabase.from('budget_items').delete().eq('budget_id', budgetId)
+  },
+}
