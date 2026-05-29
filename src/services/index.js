@@ -16,6 +16,42 @@ export const debtService = {
   async delete(id) {
     return supabase.from('debts').delete().eq('id', id)
   },
+
+  // Bayar hutang/piutang — update paid_amount, status auto-update via trigger
+  async recordPayment(id, payAmount) {
+    // Ambil data debt dulu untuk kalkulasi paid_amount baru
+    const { data: debt, error } = await supabase
+      .from('debts')
+      .select('amount, paid_amount')
+      .eq('id', id)
+      .single()
+    if (error) return { error }
+
+    const newPaid = Math.min(
+      (debt.paid_amount || 0) + payAmount,
+      debt.amount  // tidak bisa melebihi total
+    )
+
+    return supabase
+      .from('debts')
+      .update({ paid_amount: newPaid, paid_date: new Date().toISOString().split('T')[0] })
+      .eq('id', id)
+      .select()
+      .single()
+  },
+
+  // Bayar lunas sekaligus
+  async markFullyPaid(id) {
+    const { data: debt, error } = await supabase
+      .from('debts').select('amount').eq('id', id).single()
+    if (error) return { error }
+    return supabase
+      .from('debts')
+      .update({ paid_amount: debt.amount, paid_date: new Date().toISOString().split('T')[0], status: 'paid' })
+      .eq('id', id)
+      .select()
+      .single()
+  },
 }
 
 // ── Budget Service ────────────────────────────────────────

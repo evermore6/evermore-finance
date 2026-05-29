@@ -380,7 +380,53 @@ export function useDebts() {
   const updateDebt = async (id, data) => { const r = await debtService.update(id, data); if (!r.error) { setDebts(p => p.map(x => x.id === id ? r.data : x)); toast.success('Updated!') } else toast.error(r.error.message); return r }
   const deleteDebt = async (id)       => { const r = await debtService.delete(id); if (!r.error) { setDebts(p => p.filter(x => x.id !== id)); toast.success('Deleted') } else toast.error(r.error.message) }
 
-  return { debts, payables: debts.filter(d => d.debt_type === 'payable'), receivables: debts.filter(d => d.debt_type === 'receivable'), loading, addDebt, updateDebt, deleteDebt }
+  // ── Bayar hutang / terima piutang ─────────────────────────
+  const payDebt = async ({ debt_id, pay_amount, pay_mode, wallet_id, admin_fee = 0, description }) => {
+    try {
+      const debt = debts.find(d => d.id === debt_id)
+      if (!debt) throw new Error('Debt not found')
+
+      const isPayable    = debt.debt_type === 'payable'
+      const isReceivable = debt.debt_type === 'receivable'
+      const today        = new Date().toISOString().split('T')[0]
+
+      // 1. Update paid_amount di DB (trigger otomatis update status)
+      const r = pay_mode === 'full'
+        ? await debtService.markFullyPaid(debt_id)
+        : await debtService.recordPayment(debt_id, pay_amount)
+      if (r.error) throw r.error
+
+      // Update local state
+      setDebts(p => p.map(x => x.id === debt_id ? r.data : x))
+
+      // 2. Adjust wallet balance
+      if (wallet_id) {
+        // Payable: keluar dari wallet (bayar hutang) → delta negatif
+        // Receivable: masuk ke wallet (terima uang) → delta positif
+        const actualAmount = pay_mode === 'full'
+          ? (debt.amount - (debt.paid_amount || 0))
+          : pay_amount
+
+        const walletDelta = isPayable
+          ? -(actualAmount + admin_fee)
+          : actualAmount
+
+        await walletService.adjustBalance(wallet_id, walletDelta)
+
+        // Admin fee juga kurangi wallet kalau receivable (biaya transfer masuk)
+        // Biasanya yang nanggung admin fee adalah si pengirim, jadi untuk receivable tidak dikurangi
+
+        return { data: r.data, walletDelta, actualAmount, admin_fee }
+      }
+
+      return { data: r.data, actualAmount: pay_mode === 'full' ? (debt.amount - (debt.paid_amount || 0)) : pay_amount }
+    } catch (e) {
+      toast.error(e.message)
+      return { error: e }
+    }
+  }
+
+  return { debts, payables: debts.filter(d => d.debt_type === 'payable'), receivables: debts.filter(d => d.debt_type === 'receivable'), loading, addDebt, updateDebt, deleteDebt, payDebt }
 }
 
 // ── useBudgets ────────────────────────────────────────────

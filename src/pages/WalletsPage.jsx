@@ -67,11 +67,17 @@ export default function WalletsPage() {
     if (!error) setEditItem(null)
   }
 
-  const handleTransfer = async (fromId, toId, amount) => {
+  const handleTransfer = async (fromId, toId, amount, adminFee = 0) => {
     setTransferLoading(true)
-    const { error } = await transferFunds(fromId, toId, amount)
-    setTransferLoading(false)
-    if (!error) setShowTransfer(false)
+    try {
+      const { error } = await transferFunds(fromId, toId, amount, adminFee)
+      if (!error) {
+        setShowTransfer(false)
+      }
+    } finally {
+      // finally memastikan loading SELALU di-reset, bahkan kalau error
+      setTransferLoading(false)
+    }
   }
 
   const handleDelete = async (id) => {
