@@ -34,21 +34,31 @@ export default function DashboardPage() {
     return getMonthsRange(6).map(({ year, month, label }) => {
       const f = allTxns.filter(t => {
         const d = new Date(t.date)
-        return d.getFullYear() === year && d.getMonth() === month && t.transaction_subtype === 'regular'
+        return d.getFullYear() === year && d.getMonth() === month
       })
+      // Exclude transfer & topup — bukan pemasukan/pengeluaran nyata
+      const isRealExpense = t => t.type === 'expense' && t.transaction_subtype !== 'transfer' && t.transaction_subtype !== 'topup'
+      const isRealIncome  = t => t.type === 'income'  && t.transaction_subtype !== 'transfer' && t.transaction_subtype !== 'topup'
       return {
         label,
-        income:  f.filter(t => t.type === 'income').reduce((s,t) => s + t.amount, 0),
-        expense: f.filter(t => t.type === 'expense').reduce((s,t) => s + t.amount, 0),
+        income:  f.filter(isRealIncome).reduce((s,t) => s + t.amount, 0),
+        expense: f.filter(isRealExpense).reduce((s,t) => s + t.amount, 0),
       }
     })
   }, [allTxns])
 
   const categoryData = useMemo(() => {
     const map = {}
-    transactions.filter(t => t.type === 'expense' && t.transaction_subtype === 'regular').forEach(t => {
-      map[t.category] = (map[t.category] || 0) + t.amount
-    })
+    transactions
+      .filter(t =>
+        t.type === 'expense' &&
+        t.transaction_subtype !== 'transfer' &&
+        t.transaction_subtype !== 'topup' &&
+        t.category !== 'transfer'  // exclude kategori transfer dari pie chart
+      )
+      .forEach(t => {
+        map[t.category] = (map[t.category] || 0) + t.amount
+      })
     return Object.entries(map)
       .map(([id, value]) => { const cat = getCategoryById(id); return { name: cat?.label || id, value, color: cat?.color || '#a3b18a' } })
       .sort((a,b) => b.value - a.value).slice(0, 6)

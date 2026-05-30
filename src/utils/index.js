@@ -70,11 +70,32 @@ export const getMonthsRange = (n = 6) => {
   return months
 }
 
-// ── AI Insights (rule-based) ─────────────────────────────
+// ── Helper: apakah transaksi ini pengeluaran nyata? ────────
+// Transfer & topup antar wallet BUKAN pengeluaran nyata.
+// Hanya 'regular' expense dan 'saving_contribution' yang dihitung.
+// Admin fee (category: admin_fee) tetap dihitung karena itu memang keluar uang.
+const isRealExpense = (t) => {
+  if (t.type !== 'expense') return false
+  // transfer & topup subtype: bukan pengeluaran nyata
+  if (t.transaction_subtype === 'transfer') return false
+  if (t.transaction_subtype === 'topup')    return false
+  return true
+}
+
+const isRealIncome = (t) => {
+  if (t.type !== 'income') return false
+  // Income dari transfer/topup masuk adalah perpindahan wallet, bukan pemasukan nyata
+  if (t.transaction_subtype === 'transfer') return false
+  if (t.transaction_subtype === 'topup')    return false
+  return true
+}
+
+// ── AI Insights (rule-based) ──────────────────────────────
 export const generateInsights = (transactions, budgets = []) => {
   if (!transactions.length) return []
   const insights = []
   const now = new Date()
+
   const thisMonth = transactions.filter(t => {
     const d = new Date(t.date)
     return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear()
@@ -85,11 +106,12 @@ export const generateInsights = (transactions, budgets = []) => {
     return d.getMonth() === lm.getMonth() && d.getFullYear() === lm.getFullYear()
   })
 
-  const thisIncome  = thisMonth.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0)
-  const thisExpense = thisMonth.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0)
-  const lastExpense = lastMonth.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0)
+  // Hanya hitung pengeluaran & pemasukan NYATA — exclude transfer/topup antar wallet
+  const thisIncome  = thisMonth.filter(isRealIncome).reduce((s, t) => s + t.amount, 0)
+  const thisExpense = thisMonth.filter(isRealExpense).reduce((s, t) => s + t.amount, 0)
+  const lastExpense = lastMonth.filter(isRealExpense).reduce((s, t) => s + t.amount, 0)
 
-  // Saving rate
+  // ── Saving rate ──────────────────────────────────────────
   if (thisIncome > 0) {
     const savingRate = ((thisIncome - thisExpense) / thisIncome * 100).toFixed(0)
     if (savingRate >= 20) {
@@ -97,38 +119,48 @@ export const generateInsights = (transactions, budgets = []) => {
     } else if (savingRate < 0) {
       insights.push({ type: 'warning', icon: '⚠️', text: `Pengeluaran bulan ini melebihi pemasukan sebesar ${formatCurrency(thisExpense - thisIncome)}.` })
     } else {
-      insights.push({ type: 'info', icon: '💡', text: `Saving rate bulan ini ${savingRate}%. Coba targetkan minimal 20% untuk kondisi finansial sehat.` })
+      insights.push({ type: 'info', icon: '💡', text: `Saving rate bulan ini ${savingRate}%. Targetkan minimal 20% untuk kondisi finansial sehat.` })
     }
   }
 
-  // Spending increase
+  // ── Perbandingan bulan lalu ──────────────────────────────
   if (lastExpense > 0) {
     const diff = ((thisExpense - lastExpense) / lastExpense * 100).toFixed(0)
     if (diff > 20) {
-      insights.push({ type: 'warning', icon: '📈', text: `Pengeluaran bulan ini naik ${diff}% dari bulan lalu.` })
+      insights.push({ type: 'warning', icon: '📈', text: `Pengeluaran nyata bulan ini naik ${diff}% dari bulan lalu.` })
     } else if (diff < -10) {
       insights.push({ type: 'positive', icon: '📉', text: `Pengeluaran turun ${Math.abs(diff)}% dari bulan lalu. Kerja bagus!` })
     }
   }
 
-  // Biggest expense category
+  // ── Kategori terbesar — exclude transfer & topup ─────────
   const catTotals = {}
-  thisMonth.filter(t => t.type === 'expense').forEach(t => {
-    catTotals[t.category] = (catTotals[t.category] || 0) + t.amount
-  })
+  thisMonth
+    .filter(isRealExpense)
+    // Jangan tampilkan 'transfer' di insight karena itu bukan belanja
+    .filter(t => t.category !== 'transfer')
+    .forEach(t => {
+      catTotals[t.category] = (catTotals[t.category] || 0) + t.amount
+    })
+
   const topCat = Object.entries(catTotals).sort((a, b) => b[1] - a[1])[0]
   if (topCat) {
-    insights.push({ type: 'info', icon: '🏷️', text: `Pengeluaran terbesar bulan ini: ${topCat[0].replace('_', ' ')} sebesar ${formatCurrency(topCat[1])}.` })
+    const catLabel = topCat[0].replace(/_/g, ' ')
+    insights.push({
+      type: 'info',
+      icon: '🏷️',
+      text: `Pengeluaran terbesar bulan ini: ${catLabel} sebesar ${formatCurrency(topCat[1])}.`,
+    })
   }
 
-  // Budget warnings
+  // ── Budget warnings ──────────────────────────────────────
   budgets.forEach(budget => {
     const spent = catTotals[budget.category] || 0
-    const pct = (spent / budget.amount * 100)
+    const pct   = (spent / budget.amount * 100)
     if (pct >= 90 && pct < 100) {
-      insights.push({ type: 'warning', icon: '🔔', text: `Budget ${budget.category.replace('_', ' ')} hampir habis (${pct.toFixed(0)}% terpakai).` })
+      insights.push({ type: 'warning', icon: '🔔', text: `Budget ${budget.category.replace(/_/g, ' ')} hampir habis (${pct.toFixed(0)}% terpakai).` })
     } else if (pct >= 100) {
-      insights.push({ type: 'danger', icon: '🚨', text: `Budget ${budget.category.replace('_', ' ')} sudah melebihi limit!` })
+      insights.push({ type: 'danger', icon: '🚨', text: `Budget ${budget.category.replace(/_/g, ' ')} sudah melebihi limit!` })
     }
   })
 

@@ -293,12 +293,12 @@ export function useTransactions({ year, month, filters = {} } = {}) {
     }
   }
 
-  const income  = transactions
-    .filter(t => t.type === 'income' && t.transaction_subtype === 'regular')
-    .reduce((s, t) => s + t.amount, 0)
-  const expense = transactions
-    .filter(t => t.type === 'expense' && t.transaction_subtype === 'regular')
-    .reduce((s, t) => s + t.amount, 0)
+  // Hanya hitung income/expense NYATA — exclude transfer & topup antar wallet
+  const isRealIncome  = t => t.type === 'income'  && t.transaction_subtype !== 'transfer' && t.transaction_subtype !== 'topup'
+  const isRealExpense = t => t.type === 'expense' && t.transaction_subtype !== 'transfer' && t.transaction_subtype !== 'topup'
+
+  const income  = transactions.filter(isRealIncome).reduce((s, t) => s + t.amount, 0)
+  const expense = transactions.filter(isRealExpense).reduce((s, t) => s + t.amount, 0)
 
   return {
     transactions, loading, error,
