@@ -255,43 +255,57 @@ export function WalletForm({ onSubmit, defaultValues, loading }) {
 
 // ── Transfer Modal ────────────────────────────────────────
 export function TransferModal({ open, onClose, wallets, onTransfer, loading }) {
-  const { register, handleSubmit, watch, formState: { errors } } = useForm({
-    defaultValues: { from_wallet_id: '', to_wallet_id: '', amount: '' }
+  const { register, handleSubmit, watch, reset, formState: { errors } } = useForm({
+    defaultValues: { from_wallet_id: '', to_wallet_id: '', amount: '', admin_fee: '0' }
   })
 
-  const fromId = watch('from_wallet_id')
-  const toId   = watch('to_wallet_id')
-  const fromWallet = wallets.find(w => w.id === fromId)
+  const fromId     = watch('from_wallet_id')
+  const toId       = watch('to_wallet_id')
+  const amount     = parseFloat(watch('amount') || 0)
+  const adminFee   = parseFloat(watch('admin_fee') || 0)
+  const fromWallet = wallets?.find(w => w.id === fromId)
+  const toWallet   = wallets?.find(w => w.id === toId)
+
+  // Cek apakah sesama bank → tidak perlu admin fee
+  const sameName     = fromWallet && toWallet && fromWallet.name === toWallet.name
+  const showAdminFee = !sameName && (fromWallet?.type === 'bank' || fromWallet?.type === 'ewallet')
+
+  const handleClose = () => { reset(); onClose() }
 
   const onSubmit = (data) => {
     if (data.from_wallet_id === data.to_wallet_id) return
-    onTransfer(data.from_wallet_id, data.to_wallet_id, parseFloat(data.amount))
+    onTransfer(
+      data.from_wallet_id,
+      data.to_wallet_id,
+      parseFloat(data.amount),
+      parseFloat(data.admin_fee || 0)
+    )
   }
 
   return (
-    <Modal open={open} onClose={onClose} title="Transfer Antar Wallet" size="sm">
+    <Modal open={open} onClose={handleClose} title="Transfer Antar Wallet" size="sm">
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
         <div>
-          <label className="text-sm font-medium text-warmgray-600 dark:text-warmgray-300 block mb-1.5">Dari</label>
+          <label className="text-sm font-medium text-warmgray-600 dark:text-warmgray-300 block mb-1.5">Dari wallet</label>
           <select
             className="w-full px-3.5 py-2.5 rounded-xl border border-warmgray-200 dark:border-warmgray-700 bg-white/60 dark:bg-warmgray-900/40 text-sm focus:outline-none focus:border-sage-400"
             {...register('from_wallet_id', { required: true })}
           >
-            <option value="">Pilih wallet asal</option>
-            {wallets.map(w => (
+            <option value="">Pilih wallet asal…</option>
+            {wallets?.map(w => (
               <option key={w.id} value={w.id}>{w.icon} {w.name} — {formatCurrency(w.balance)}</option>
             ))}
           </select>
         </div>
 
         <div>
-          <label className="text-sm font-medium text-warmgray-600 dark:text-warmgray-300 block mb-1.5">Ke</label>
+          <label className="text-sm font-medium text-warmgray-600 dark:text-warmgray-300 block mb-1.5">Ke wallet</label>
           <select
             className="w-full px-3.5 py-2.5 rounded-xl border border-warmgray-200 dark:border-warmgray-700 bg-white/60 dark:bg-warmgray-900/40 text-sm focus:outline-none focus:border-sage-400"
             {...register('to_wallet_id', { required: true })}
           >
-            <option value="">Pilih wallet tujuan</option>
-            {wallets.filter(w => w.id !== fromId).map(w => (
+            <option value="">Pilih wallet tujuan…</option>
+            {wallets?.filter(w => w.id !== fromId).map(w => (
               <option key={w.id} value={w.id}>{w.icon} {w.name} — {formatCurrency(w.balance)}</option>
             ))}
           </select>
@@ -302,21 +316,50 @@ export function TransferModal({ open, onClose, wallets, onTransfer, loading }) {
           <div className="relative">
             <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-sm text-warmgray-500">Rp</span>
             <input
-              type="number" min="1"
-              placeholder="0"
-              className={`w-full pl-10 pr-4 py-2.5 rounded-xl border text-sm font-mono bg-white/60 dark:bg-warmgray-900/40 focus:outline-none focus:border-sage-400 ${errors.amount ? 'border-red-400' : 'border-warmgray-200 dark:border-warmgray-700'}`}
+              type="number" min="1" placeholder="0"
+              className={`w-full pl-10 pr-4 py-2.5 rounded-xl border text-lg font-mono bg-white/60 dark:bg-warmgray-900/40 focus:outline-none focus:border-sage-400 ${errors.amount ? 'border-red-400' : 'border-warmgray-200 dark:border-warmgray-700'}`}
               {...register('amount', {
-                required: 'Amount required',
-                min: { value: 1, message: 'Must be > 0' },
-                validate: v => !fromWallet || parseFloat(v) <= fromWallet.balance || 'Saldo tidak cukup'
+                required: 'Masukkan jumlah',
+                min: { value: 1, message: 'Harus > 0' },
+                validate: v => !fromWallet || parseFloat(v) <= fromWallet.balance || `Saldo ${fromWallet.name} tidak cukup`
               })}
             />
           </div>
           {errors.amount && <p className="text-xs text-red-500 mt-1">{errors.amount.message}</p>}
         </div>
 
+        {showAdminFee && (
+          <div>
+            <label className="text-sm font-medium text-warmgray-600 dark:text-warmgray-300 block mb-1.5">
+              Biaya Admin <span className="text-xs font-normal text-[var(--text-muted)]">(beda bank, opsional)</span>
+            </label>
+            <div className="relative">
+              <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-sm text-warmgray-500">Rp</span>
+              <input
+                type="number" min="0" defaultValue="0"
+                className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-warmgray-200 dark:border-warmgray-700 bg-white/60 dark:bg-warmgray-900/40 text-sm font-mono focus:outline-none focus:border-sage-400"
+                {...register('admin_fee')}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Preview */}
+        {fromWallet && toWallet && amount > 0 && (
+          <div className="p-3 rounded-xl bg-blue-50 dark:bg-blue-900/15 border border-blue-200 dark:border-blue-800 text-xs space-y-1">
+            <p className="font-medium text-blue-700 dark:text-blue-300">Ringkasan</p>
+            <p className="text-blue-600 dark:text-blue-400">
+              {fromWallet.icon} {fromWallet.name} berkurang <strong>{formatCurrency(amount + adminFee)}</strong>
+              {adminFee > 0 && <span className="text-blue-400"> (termasuk admin {formatCurrency(adminFee)})</span>}
+            </p>
+            <p className="text-blue-600 dark:text-blue-400">
+              {toWallet.icon} {toWallet.name} bertambah <strong>{formatCurrency(amount)}</strong>
+            </p>
+          </div>
+        )}
+
         <div className="flex gap-3 pt-1">
-          <Button type="button" variant="ghost" className="flex-1" onClick={onClose}>Batal</Button>
+          <Button type="button" variant="ghost" className="flex-1" onClick={handleClose}>Batal</Button>
           <Button type="submit" variant="primary" className="flex-1" loading={loading}>Transfer</Button>
         </div>
       </form>

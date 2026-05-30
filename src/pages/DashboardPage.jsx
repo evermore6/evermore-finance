@@ -37,8 +37,9 @@ export default function DashboardPage() {
         return d.getFullYear() === year && d.getMonth() === month
       })
       // Exclude transfer & topup — bukan pemasukan/pengeluaran nyata
-      const isRealExpense = t => t.type === 'expense' && t.transaction_subtype !== 'transfer' && t.transaction_subtype !== 'topup'
-      const isRealIncome  = t => t.type === 'income'  && t.transaction_subtype !== 'transfer' && t.transaction_subtype !== 'topup'
+      // Null subtype = data lama, dianggap regular
+      const isRealExpense = t => t.type === 'expense' && (t.transaction_subtype||'regular') !== 'transfer' && (t.transaction_subtype||'regular') !== 'topup'
+      const isRealIncome  = t => t.type === 'income'  && (t.transaction_subtype||'regular') !== 'transfer' && (t.transaction_subtype||'regular') !== 'topup'
       return {
         label,
         income:  f.filter(isRealIncome).reduce((s,t) => s + t.amount, 0),
@@ -52,9 +53,9 @@ export default function DashboardPage() {
     transactions
       .filter(t =>
         t.type === 'expense' &&
-        t.transaction_subtype !== 'transfer' &&
-        t.transaction_subtype !== 'topup' &&
-        t.category !== 'transfer'  // exclude kategori transfer dari pie chart
+        (t.transaction_subtype||'regular') !== 'transfer' &&
+        (t.transaction_subtype||'regular') !== 'topup' &&
+        t.category !== 'transfer'
       )
       .forEach(t => {
         map[t.category] = (map[t.category] || 0) + t.amount

@@ -72,21 +72,23 @@ export const getMonthsRange = (n = 6) => {
 
 // ── Helper: apakah transaksi ini pengeluaran nyata? ────────
 // Transfer & topup antar wallet BUKAN pengeluaran nyata.
-// Hanya 'regular' expense dan 'saving_contribution' yang dihitung.
-// Admin fee (category: admin_fee) tetap dihitung karena itu memang keluar uang.
+// category 'transfer' juga bukan pengeluaran nyata (debt payment dll).
+// Null subtype dianggap 'regular' (data lama sebelum kolom subtype ada).
 const isRealExpense = (t) => {
   if (t.type !== 'expense') return false
-  // transfer & topup subtype: bukan pengeluaran nyata
-  if (t.transaction_subtype === 'transfer') return false
-  if (t.transaction_subtype === 'topup')    return false
+  const sub = t.transaction_subtype || 'regular'
+  if (sub === 'transfer') return false
+  if (sub === 'topup')    return false
+  // Kalau kategorinya 'transfer' tapi subtype regular → kemungkinan debt payment
+  // tetap dihitung sebagai expense nyata
   return true
 }
 
 const isRealIncome = (t) => {
   if (t.type !== 'income') return false
-  // Income dari transfer/topup masuk adalah perpindahan wallet, bukan pemasukan nyata
-  if (t.transaction_subtype === 'transfer') return false
-  if (t.transaction_subtype === 'topup')    return false
+  const sub = t.transaction_subtype || 'regular'
+  if (sub === 'transfer') return false
+  if (sub === 'topup')    return false
   return true
 }
 

@@ -55,15 +55,33 @@ export function useWallets() {
   }
 
   const totalBalance = wallets
-    .filter(w => w.type !== 'investment') // investasi tidak masuk liquid balance
+    .filter(w => w.type !== 'investment')
     .reduce((s, w) => s + (w.balance || 0), 0)
 
   const netWorth = wallets.reduce((s, w) => s + (w.balance || 0), 0)
 
+  // ── Transfer antar wallet (dipanggil dari WalletsPage) ─
+  const transferFunds = async (fromId, toId, amount, adminFee = 0) => {
+    try {
+      const { error } = await walletService.transfer(fromId, toId, amount, adminFee)
+      if (error) throw error
+
+      // Update saldo lokal
+      applyBalanceDelta(fromId, -(amount + adminFee))
+      applyBalanceDelta(toId,    amount)
+
+      toast.success('Transfer berhasil!')
+      return { error: null }
+    } catch (e) {
+      toast.error(e.message || 'Transfer gagal')
+      return { error: e }
+    }
+  }
+
   return {
     wallets, loading, totalBalance, netWorth,
     addWallet, updateWallet, deleteWallet,
-    applyBalanceDelta, refetch: fetch
+    applyBalanceDelta, transferFunds, refetch: fetch
   }
 }
 
@@ -294,8 +312,9 @@ export function useTransactions({ year, month, filters = {} } = {}) {
   }
 
   // Hanya hitung income/expense NYATA — exclude transfer & topup antar wallet
-  const isRealIncome  = t => t.type === 'income'  && t.transaction_subtype !== 'transfer' && t.transaction_subtype !== 'topup'
-  const isRealExpense = t => t.type === 'expense' && t.transaction_subtype !== 'transfer' && t.transaction_subtype !== 'topup'
+  // Null subtype = data lama, dianggap 'regular'
+  const isRealIncome  = t => t.type === 'income'  && (t.transaction_subtype || 'regular') !== 'transfer' && (t.transaction_subtype || 'regular') !== 'topup'
+  const isRealExpense = t => t.type === 'expense' && (t.transaction_subtype || 'regular') !== 'transfer' && (t.transaction_subtype || 'regular') !== 'topup'
 
   const income  = transactions.filter(isRealIncome).reduce((s, t) => s + t.amount, 0)
   const expense = transactions.filter(isRealExpense).reduce((s, t) => s + t.amount, 0)
