@@ -93,7 +93,7 @@ const isRealIncome = (t) => {
 }
 
 // ── AI Insights (rule-based) ──────────────────────────────
-export const generateInsights = (transactions, budgets = []) => {
+export const generateInsights = (transactions, budgets = [], debts = []) => {
   if (!transactions.length) return []
   const insights = []
   const now = new Date()
@@ -166,5 +166,56 @@ export const generateInsights = (transactions, budgets = []) => {
     }
   })
 
-  return insights.slice(0, 4)
+  // ── Debt reminders ──────────────────────────────────────
+  const activeDebts = debts.filter(d => d.status !== 'paid')
+  if (activeDebts.length > 0) {
+    // Overdue
+    const overdueDebts = activeDebts.filter(d => d.due_date && daysUntil(d.due_date) < 0)
+    if (overdueDebts.length > 0) {
+      const names = overdueDebts.map(d => d.person_name).slice(0, 2).join(', ')
+      insights.push({
+        type: 'danger',
+        icon: '🚨',
+        text: `${overdueDebts.length} hutang sudah lewat jatuh tempo: ${names}.`,
+      })
+    }
+
+    // Due soon (within 7 days)
+    const dueSoon = activeDebts.filter(d => {
+      if (!d.due_date) return false
+      const days = daysUntil(d.due_date)
+      return days >= 0 && days <= 7
+    })
+    if (dueSoon.length > 0) {
+      const d = dueSoon[0]
+      const days = daysUntil(d.due_date)
+      insights.push({
+        type: 'warning',
+        icon: '🔔',
+        text: `Hutang ke ${d.person_name} ${formatCurrency(d.amount - (d.paid_amount || 0))} jatuh tempo ${days === 0 ? 'hari ini' : `${days} hari lagi`}.`,
+      })
+    }
+
+    // Total summary kalau ada banyak hutang
+    const payables    = activeDebts.filter(d => d.debt_type === 'payable')
+    const receivables = activeDebts.filter(d => d.debt_type === 'receivable')
+    if (payables.length > 0) {
+      const total = payables.reduce((s, d) => s + (d.amount - (d.paid_amount || 0)), 0)
+      insights.push({
+        type: 'info',
+        icon: '💸',
+        text: `Total sisa hutangmu: ${formatCurrency(total)} dari ${payables.length} orang.`,
+      })
+    }
+    if (receivables.length > 0) {
+      const total = receivables.reduce((s, d) => s + (d.amount - (d.paid_amount || 0)), 0)
+      insights.push({
+        type: 'info',
+        icon: '💰',
+        text: `Kamu punya piutang ${formatCurrency(total)} yang belum diterima dari ${receivables.length} orang.`,
+      })
+    }
+  }
+
+  return insights.slice(0, 5)
 }

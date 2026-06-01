@@ -24,6 +24,8 @@ export const INCOME_CATEGORIES = [
 export const ALL_CATEGORIES = [
   ...EXPENSE_CATEGORIES.map(c => ({ ...c, type: 'expense' })),
   ...INCOME_CATEGORIES.map(c => ({ ...c, type: 'income' })),
+  // Special categories — tidak ada di picker tapi dikenali di display
+  { id: 'debt_payment', label: 'Debt Payment', icon: '🤝', color: '#7a6ab0', type: 'expense' },
 ]
 
 export const getCategoryById = (id) => ALL_CATEGORIES.find(c => c.id === id)

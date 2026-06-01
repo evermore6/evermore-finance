@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react'
 import { motion } from 'framer-motion'
 import { Plus, Download } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
-import { useTransactions, useAllTransactions, useBudgets, useWallets, useSavingsGoals, useCustomCategories } from '@/hooks'
+import { useTransactions, useAllTransactions, useBudgets, useWallets, useSavingsGoals, useCustomCategories, useDebts } from '@/hooks'
 import { BalanceSummary, MonthlyChart, CategoryChart, RecentTransactions, AIInsights } from '@/components/dashboard'
 import { WalletSummary } from '@/components/wallets'
 import { QuickAddModal } from '@/components/transactions/QuickAddModal'
@@ -27,6 +27,7 @@ export default function DashboardPage() {
   const { transactions: allTxns } = useAllTransactions()
   const { budgets }                = useBudgets()
   const { goals }                  = useSavingsGoals()
+  const { debts }                  = useDebts()
   const { categories: customCats } = useCustomCategories()
   const { wallets, totalBalance, loading: walletsLoading, applyBalanceDelta } = useWallets()
 
@@ -65,7 +66,7 @@ export default function DashboardPage() {
       .sort((a,b) => b.value - a.value).slice(0, 6)
   }, [transactions])
 
-  const insights = useMemo(() => generateInsights(allTxns, budgets), [allTxns, budgets])
+  const insights = useMemo(() => generateInsights(allTxns, budgets, debts), [allTxns, budgets, debts])
 
   const handleAdd = async (data) => {
     setAddLoading(true)

@@ -178,7 +178,7 @@ export default function DebtsPage() {
           user_id:             user.id,
           type:                isPayable ? 'income' : 'expense',
           transaction_subtype: 'regular',
-          category:            'transfer',
+          category:            'debt_payment',
           amount,
           wallet_id,
           date:                today,
@@ -259,16 +259,15 @@ export default function DebtsPage() {
         applyBalanceDelta(payData.wallet_id, delta)
       }
 
-      // 3. Catat transaksi utama
-      const today2 = today
+      // 3. Catat transaksi utama — pakai kategori 'debt_payment' bukan 'transfer'
       await transactionService.create({
         user_id:             user.id,
         type:                isPayable ? 'expense' : 'income',
         transaction_subtype: 'regular',
-        category:            'transfer',
+        category:            'debt_payment',
         amount:              actualAmount,
         wallet_id:           payData.wallet_id || null,
-        date:                today2,
+        date:                today,
         description:         payData.description ||
           (isPayable
             ? `Bayar hutang ke ${debt.person_name}`
