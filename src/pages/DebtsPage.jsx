@@ -149,9 +149,67 @@ export default function DebtsPage() {
   // ── Handlers ────────────────────────────────────────────
   const handleAdd = async (data) => {
     setSaving(true)
-    const { error } = await addDebt({ ...data, debt_type: tab, paid_amount: 0 })
-    setSaving(false)
-    if (!error) setShowAdd(false)
+    try {
+      const { wallet_id, admin_fee = 0, ...debtFields } = data
+      const today = new Date().toISOString().split('T')[0]
+
+      // 1. Simpan debt ke DB
+      const { error: debtErr } = await addDebt({
+        ...debtFields,
+        debt_type:  tab,
+        paid_amount: 0,
+        wallet_id:  wallet_id || null,
+      })
+      if (debtErr) throw debtErr
+
+      // 2. Kalau wallet dipilih → adjust saldo + catat transaksi
+      if (wallet_id) {
+        const amount    = parseFloat(debtFields.amount)
+        const isPayable = tab === 'payable'
+
+        // AP (hutang): kamu terima uang → wallet bertambah
+        // AR (piutang): kamu kasih uang → wallet berkurang
+        const delta = isPayable ? amount : -amount
+        await walletService.adjustBalance(wallet_id, delta)
+        applyBalanceDelta(wallet_id, delta)
+
+        // Catat sebagai transaksi
+        await transactionService.create({
+          user_id:             user.id,
+          type:                isPayable ? 'income' : 'expense',
+          transaction_subtype: 'regular',
+          category:            'transfer',
+          amount,
+          wallet_id,
+          date:                today,
+          description: isPayable
+            ? `Hutang dari ${debtFields.person_name}`
+            : `Pinjam ke ${debtFields.person_name}`,
+        })
+
+        // Admin fee kalau ada (AR + transfer bank)
+        if (admin_fee > 0) {
+          await walletService.adjustBalance(wallet_id, -admin_fee)
+          applyBalanceDelta(wallet_id, -admin_fee)
+          await transactionService.create({
+            user_id:             user.id,
+            type:                'expense',
+            transaction_subtype: 'regular',
+            category:            'admin_fee',
+            amount:              admin_fee,
+            wallet_id,
+            date:                today,
+            description:         `Biaya admin transfer ke ${debtFields.person_name}`,
+          })
+        }
+      }
+
+      setShowAdd(false)
+    } catch (e) {
+      toast.error(e.message || 'Gagal menyimpan')
+    } finally {
+      setSaving(false)
+    }
   }
 
   const handleEdit = async (data) => {
@@ -351,7 +409,12 @@ export default function DebtsPage() {
         title={`Tambah ${tab === 'payable' ? 'Hutang' : 'Piutang'}`}
         size="md"
       >
-        <DebtForm onSubmit={handleAdd} debtType={tab} loading={savingLoading} />
+        <DebtForm
+          onSubmit={handleAdd}
+          debtType={tab}
+          loading={savingLoading}
+          wallets={wallets}
+        />
       </Modal>
 
       <Modal
