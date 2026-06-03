@@ -114,7 +114,7 @@ export default function DashboardPage() {
         <AIInsights insights={insights} />
       </div>
 
-      <RecentTransactions transactions={transactions} loading={loading} />
+      <RecentTransactions transactions={transactions} loading={loading} customCategories={customCats} />
 
       {/* FAB mobile */}
       <motion.button whileTap={{ scale: 0.93 }} onClick={() => setShowAdd(true)}

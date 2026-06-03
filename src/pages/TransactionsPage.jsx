@@ -318,6 +318,7 @@ export default function TransactionsPage() {
             loading={loading}
             onEdit={t => setEditItem(t)}
             onDelete={id => setDeleteConfirm(id)}
+            customCategories={customCats}
           />
         </div>
       </Card>

@@ -1,34 +1,51 @@
 export const EXPENSE_CATEGORIES = [
-  { id: 'food_beverage',  label: 'Food & Beverage',  icon: '🍜', color: '#e07a4a' },
-  { id: 'housing',        label: 'Housing',           icon: '🏠', color: '#6a9ecc' },
-  { id: 'personal_care',  label: 'Personal Care',     icon: '✨', color: '#c47ab0' },
-  { id: 'transportation', label: 'Transportation',    icon: '🚗', color: '#5a9a7a' },
-  { id: 'shopping',       label: 'Shopping',          icon: '🛍️', color: '#d06a8a' },
-  { id: 'entertainment',  label: 'Entertainment',     icon: '🎬', color: '#8a78cc' },
-  { id: 'education',      label: 'Education',         icon: '📚', color: '#60a8c0' },
-  { id: 'healthcare',     label: 'Healthcare',        icon: '🏥', color: '#70b870' },
-  { id: 'transfer',       label: 'Transfer',          icon: '↔️', color: '#9090a0' },
-  { id: 'utilities',      label: 'Utilities',         icon: '💡', color: '#c8a048' },
-  { id: 'admin_fee',      label: 'Admin Fee',         icon: '🏷️', color: '#b07050' },
-  { id: 'misc',           label: 'Misc',              icon: '📦', color: '#a0a0a0' },
+  { id: 'food_beverage',    label: 'Food & Beverage',    icon: '🍜', color: '#e07a4a' },
+  { id: 'housing',          label: 'Housing',            icon: '🏠', color: '#6a9ecc' },
+  { id: 'personal_care',   label: 'Personal Care',      icon: '✨', color: '#c47ab0' },
+  { id: 'transportation',  label: 'Transportation',     icon: '🚗', color: '#5a9a7a' },
+  { id: 'shopping',        label: 'Shopping',           icon: '🛍️', color: '#d06a8a' },
+  { id: 'entertainment',   label: 'Entertainment',      icon: '🎬', color: '#8a78cc' },
+  { id: 'education',       label: 'Education',          icon: '📚', color: '#60a8c0' },
+  { id: 'healthcare',      label: 'Healthcare',         icon: '🏥', color: '#70b870' },
+  { id: 'family_transfer', label: 'Family Transfer',    icon: '👨‍👩‍👧', color: '#e8a838' },
+  { id: 'transfer',        label: 'Transfer',           icon: '↔️', color: '#9090a0' },
+  { id: 'debt_payment',    label: 'Debt Payment',       icon: '🤝', color: '#7a6ab0' },
+  { id: 'utilities',       label: 'Utilities',          icon: '💡', color: '#c8a048' },
+  { id: 'admin_fee',       label: 'Admin Fee',          icon: '🏷️', color: '#b07050' },
+  { id: 'misc',            label: 'Misc',               icon: '📦', color: '#a0a0a0' },
 ]
 
 export const INCOME_CATEGORIES = [
-  { id: 'salary',    label: 'Salary',    icon: '💼', color: '#5a8a4a' },
-  { id: 'freelance', label: 'Freelance', icon: '💻', color: '#4a7aba' },
-  { id: 'bonus',     label: 'Bonus',     icon: '🎁', color: '#c8a048' },
-  { id: 'gift',      label: 'Gift',      icon: '🎀', color: '#c47ab0' },
-  { id: 'refund',    label: 'Refund',    icon: '↩️', color: '#70b870' },
+  { id: 'salary',           label: 'Salary',             icon: '💼', color: '#5a8a4a' },
+  { id: 'freelance',        label: 'Freelance',          icon: '💻', color: '#4a7aba' },
+  { id: 'bonus',            label: 'Bonus',              icon: '🎁', color: '#c8a048' },
+  { id: 'gift',             label: 'Gift',               icon: '🎀', color: '#c47ab0' },
+  { id: 'receivable_paid',  label: 'Receivable Paid',    icon: '💰', color: '#5a8a4a' },
+  { id: 'refund',           label: 'Refund',             icon: '↩️', color: '#70b870' },
 ]
+
+// Kategori yang TIDAK dihitung sebagai pengeluaran nyata di AI insights
+export const EXCLUDED_FROM_INSIGHTS = new Set([
+  'transfer',
+  'family_transfer',  // transfer ke keluarga tidak masuk "terbesar"
+  'debt_payment',
+  'admin_fee',
+])
 
 export const ALL_CATEGORIES = [
   ...EXPENSE_CATEGORIES.map(c => ({ ...c, type: 'expense' })),
   ...INCOME_CATEGORIES.map(c => ({ ...c, type: 'income' })),
-  // Special categories — tidak ada di picker tapi dikenali di display
-  { id: 'debt_payment', label: 'Debt Payment', icon: '🤝', color: '#7a6ab0', type: 'expense' },
 ]
 
-export const getCategoryById = (id) => ALL_CATEGORIES.find(c => c.id === id)
+export const getCategoryById = (id, customCategories = []) => {
+  // Cek built-in dulu
+  const builtin = ALL_CATEGORIES.find(c => c.id === id)
+  if (builtin) return builtin
+  // Fallback ke custom categories
+  const custom = customCategories.find(c => c.id === id)
+  if (custom) return { id: custom.id, label: custom.name, icon: custom.icon, color: custom.color, type: custom.type }
+  return null
+}
 
 export const getCategoriesByType = (type) =>
   type === 'expense' ? EXPENSE_CATEGORIES : INCOME_CATEGORIES

@@ -29,6 +29,7 @@ export function DebtPaymentModal({ open, onClose, debt, wallets, onSubmit, loadi
       wallet_id:    '',
       admin_fee:    '0',
       description:  '',
+      category:     'debt_payment',
     }
   })
 
@@ -230,6 +231,32 @@ export function DebtPaymentModal({ open, onClose, debt, wallets, onSubmit, loadi
                 </div>
               </div>
             )}
+
+            {/* ── Kategori ─────────────────────────────────── */}
+            <div>
+              <label className="text-sm font-medium text-warmgray-600 dark:text-warmgray-300 block mb-1.5">
+                Kategori Transaksi
+              </label>
+              <select
+                className="w-full px-3.5 py-2.5 rounded-xl border border-warmgray-200 dark:border-warmgray-700 bg-white/60 dark:bg-warmgray-900/40 text-sm focus:outline-none focus:border-sage-400 text-[var(--text-primary)]"
+                {...register('category')}
+              >
+                {isPayable ? (
+                  <>
+                    <option value="debt_payment">🤝 Debt Payment</option>
+                    <option value="transfer">↔️ Transfer</option>
+                    <option value="misc">📦 Misc</option>
+                  </>
+                ) : (
+                  <>
+                    <option value="debt_payment">🤝 Debt Payment</option>
+                    <option value="receivable_paid">💰 Receivable Paid</option>
+                    <option value="transfer">↔️ Transfer</option>
+                    <option value="misc">📦 Misc</option>
+                  </>
+                )}
+              </select>
+            </div>
 
             {/* ── Keterangan ──────────────────────────────── */}
             <div>

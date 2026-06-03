@@ -9,9 +9,11 @@ import { Modal, Button, Card, EmptyState, Skeleton, Badge } from '@/components/u
 import { PageHeader } from '@/components/layout/Header'
 import { formatCurrency, formatDate, formatCompact } from '@/utils'
 import { getCategoryById } from '@/constants/categories'
+import { useCustomCategories } from '@/hooks'
 
 export default function WalletsPage() {
   const { wallets, loading, totalBalance, addWallet, updateWallet, deleteWallet, transferFunds, refetch } = useWallets()
+  const { categories: customCats } = useCustomCategories()
   const { transactions } = useAllTransactions()
 
   const [showAdd,      setShowAdd]      = useState(false)
@@ -246,7 +248,7 @@ export default function WalletsPage() {
           ) : (
             <div>
               {displayedTxns.map(t => {
-                const cat    = getCategoryById(t.category)
+                const cat    = getCategoryById(t.category, customCats)
                 const wallet = wallets.find(w => w.id === t.wallet_id)
                 return (
                   <div

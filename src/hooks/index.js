@@ -1,14 +1,107 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useAuth } from '@/context/AuthContext'
+import { supabase } from '@/lib/supabase'
 import { transactionService } from '@/services/transactionService'
-import { debtService, budgetService, savingsService } from '@/services/index'
+import { debtService, budgetService, savingsService, budgetItemService } from '@/services/index'
 import { walletService, customCategoryService } from '@/services/walletService'
-import { budgetItemService } from '@/services/index'
 import toast from 'react-hot-toast'
+
+// ═══════════════════════════════════════════════════════════
+// _reverseAndDelete — hapus transaksi + balik semua efeknya
+// Dipanggil dari deleteTransaction dan bisa dipakai standalone
+// ═══════════════════════════════════════════════════════════
+async function _reverseAndDelete(txn, applyBalanceDelta, setTransactions) {
+  if (!txn) return
+  const sub         = txn.transaction_subtype || 'regular'
+  const idsToRemove = [txn.id]
+
+  // ── Transfer & Topup: reverse kedua sisi ────────────────
+  if ((sub === 'transfer' || sub === 'topup') && txn.transfer_id) {
+    const { data: pairs } = await supabase
+      .from('transactions')
+      .select('*')
+      .eq('transfer_id', txn.transfer_id)
+
+    const outTxn = pairs?.find(t => t.type === 'expense')
+    const inTxn  = pairs?.find(t => t.type === 'income')
+
+    if (outTxn?.wallet_id) {
+      // Kembalikan ke wallet asal: +amount (amount di outTxn sudah include admin_fee)
+      await walletService.adjustBalance(outTxn.wallet_id, outTxn.amount)
+      if (applyBalanceDelta) applyBalanceDelta(outTxn.wallet_id, outTxn.amount)
+      idsToRemove.push(outTxn.id)
+    }
+
+    if (inTxn?.wallet_id) {
+      // Tarik balik dari wallet tujuan
+      await walletService.adjustBalance(inTxn.wallet_id, -inTxn.amount)
+      if (applyBalanceDelta) applyBalanceDelta(inTxn.wallet_id, -inTxn.amount)
+      idsToRemove.push(inTxn.id)
+    }
+
+    // Reverse admin_fee transaction kalau ada (linked via date + wallet + category)
+    if (outTxn) {
+      const { data: adminTxns } = await supabase
+        .from('transactions')
+        .select('*')
+        .eq('user_id', outTxn.user_id)
+        .eq('category', 'admin_fee')
+        .eq('date', outTxn.date?.split('T')[0] ?? outTxn.date)
+        .eq('wallet_id', outTxn.wallet_id)
+
+      for (const at of (adminTxns || [])) {
+        await walletService.adjustBalance(at.wallet_id, at.amount)
+        if (applyBalanceDelta) applyBalanceDelta(at.wallet_id, at.amount)
+        idsToRemove.push(at.id)
+      }
+    }
+
+  // ── Saving Contribution ──────────────────────────────────
+  } else if (sub === 'saving_contribution') {
+    if (txn.wallet_id) {
+      await walletService.adjustBalance(txn.wallet_id, txn.amount)
+      if (applyBalanceDelta) applyBalanceDelta(txn.wallet_id, txn.amount)
+    }
+    if (txn.saving_goal_id) {
+      const { data: goal } = await supabase
+        .from('savings_goals').select('current_amount').eq('id', txn.saving_goal_id).single()
+      if (goal) {
+        const newAmt = Math.max((goal.current_amount || 0) - txn.amount, 0)
+        await supabase.from('savings_goals').update({ current_amount: newAmt }).eq('id', txn.saving_goal_id)
+      }
+    }
+
+  // ── Regular / Debt Payment (income atau expense biasa) ───
+  } else {
+    if (txn.wallet_id) {
+      const delta = txn.type === 'income' ? -txn.amount : txn.amount
+      await walletService.adjustBalance(txn.wallet_id, delta)
+      if (applyBalanceDelta) applyBalanceDelta(txn.wallet_id, delta)
+    }
+    // Reverse debt paid_amount kalau ada debt_id
+    if (txn.debt_id) {
+      const { data: debt } = await supabase
+        .from('debts').select('paid_amount').eq('id', txn.debt_id).single()
+      if (debt) {
+        const newPaid = Math.max((debt.paid_amount || 0) - txn.amount, 0)
+        await supabase.from('debts').update({ paid_amount: newPaid }).eq('id', txn.debt_id)
+      }
+    }
+  }
+
+  // Hapus semua transaksi yang terlibat (deduplicate)
+  const uniqueIds = [...new Set(idsToRemove)]
+  for (const id of uniqueIds) {
+    await transactionService.delete(id)
+  }
+  if (setTransactions) {
+    setTransactions(prev => prev.filter(t => !uniqueIds.includes(t.id)))
+  }
+}
 
 // ── useWallets ────────────────────────────────────────────
 export function useWallets() {
-  const { user } = useAuth()
+  const { user }  = useAuth()
   const [wallets, setWallets]   = useState([])
   const [loading, setLoading]   = useState(true)
 
@@ -26,6 +119,12 @@ export function useWallets() {
   }, [user])
 
   useEffect(() => { fetch() }, [fetch])
+
+  const applyBalanceDelta = (walletId, delta) => {
+    setWallets(p => p.map(w =>
+      w.id === walletId ? { ...w, balance: (w.balance || 0) + delta } : w
+    ))
+  }
 
   const addWallet = async (data) => {
     const { data: w, error } = await walletService.create({ ...data, user_id: user.id })
@@ -47,29 +146,12 @@ export function useWallets() {
     else toast.error(error.message)
   }
 
-  // Update saldo lokal tanpa refetch
-  const applyBalanceDelta = (walletId, delta) => {
-    setWallets(p => p.map(w =>
-      w.id === walletId ? { ...w, balance: w.balance + delta } : w
-    ))
-  }
-
-  const totalBalance = wallets
-    .filter(w => w.type !== 'investment')
-    .reduce((s, w) => s + (w.balance || 0), 0)
-
-  const netWorth = wallets.reduce((s, w) => s + (w.balance || 0), 0)
-
-  // ── Transfer antar wallet (dipanggil dari WalletsPage) ─
   const transferFunds = async (fromId, toId, amount, adminFee = 0) => {
     try {
       const { error } = await walletService.transfer(fromId, toId, amount, adminFee)
       if (error) throw error
-
-      // Update saldo lokal
       applyBalanceDelta(fromId, -(amount + adminFee))
       applyBalanceDelta(toId,    amount)
-
       toast.success('Transfer berhasil!')
       return { error: null }
     } catch (e) {
@@ -78,11 +160,10 @@ export function useWallets() {
     }
   }
 
-  return {
-    wallets, loading, totalBalance, netWorth,
-    addWallet, updateWallet, deleteWallet,
-    applyBalanceDelta, transferFunds, refetch: fetch
-  }
+  const totalBalance = wallets.filter(w => w.type !== 'investment').reduce((s, w) => s + (w.balance || 0), 0)
+  const netWorth     = wallets.reduce((s, w) => s + (w.balance || 0), 0)
+
+  return { wallets, loading, totalBalance, netWorth, addWallet, updateWallet, deleteWallet, applyBalanceDelta, transferFunds, refetch: fetch }
 }
 
 // ── useTransactions ───────────────────────────────────────
@@ -117,111 +198,63 @@ export function useTransactions({ year, month, filters = {} } = {}) {
   }, [user, y, m, filters.type, filters.search])
 
   useEffect(() => { fetchTransactions() }, [fetchTransactions])
+  useEffect(() => { if (user) transactionService.processRecurring(user.id) }, [user])
 
-  useEffect(() => {
-    if (user) transactionService.processRecurring(user.id)
-  }, [user])
-
-  // ── Tambah transaksi (semua tipe) ─────────────────────
   const addTransaction = async (data, applyBalanceDelta) => {
     try {
-      const subtype = data.transaction_subtype || 'regular'
+      const sub = data.transaction_subtype || 'regular'
 
       // ── Transfer / Topup ──────────────────────────────
-      if (subtype === 'transfer' || subtype === 'topup') {
+      if (sub === 'transfer' || sub === 'topup') {
         const { from_wallet_id, to_wallet_id, amount, admin_fee = 0, description, date } = data
-
-        // Atomic transfer di DB
         const { error: txErr } = await walletService.transfer(from_wallet_id, to_wallet_id, amount, admin_fee)
         if (txErr) throw txErr
 
-        // Update local wallet state
         if (applyBalanceDelta) {
           applyBalanceDelta(from_wallet_id, -(amount + admin_fee))
           applyBalanceDelta(to_wallet_id,   amount)
         }
 
-        // Simpan transaksi yang linked (untuk history)
         const transferId = crypto.randomUUID()
-        const batchRows = []
-
-        // Transaksi keluar (amount saja, tanpa admin fee)
-        batchRows.push({
-          user_id:             user.id,
-          type:                'expense',
-          transaction_subtype: subtype,
-          category:            'transfer',
-          amount,
-          admin_fee,
-          wallet_id:           from_wallet_id,
-          to_wallet_id,
-          transfer_id:         transferId,
-          description:         description || (subtype === 'topup' ? 'Top Up' : 'Transfer'),
-          date,
-        })
-
-        // Transaksi masuk ke wallet tujuan
-        batchRows.push({
-          user_id:             user.id,
-          type:                'income',
-          transaction_subtype: subtype,
-          category:            'transfer',
-          amount,
-          wallet_id:           to_wallet_id,
-          transfer_id:         transferId,
-          description:         description || (subtype === 'topup' ? 'Top Up diterima' : 'Transfer diterima'),
-          date,
-        })
-
-        // ── AUTO: Admin fee → expense terpisah jika > 0 ───
+        const batchRows = [
+          {
+            user_id: user.id, type: 'expense', transaction_subtype: sub,
+            category: 'transfer', amount, admin_fee,
+            wallet_id: from_wallet_id, to_wallet_id, transfer_id: transferId,
+            description: description || (sub === 'topup' ? 'Top Up' : 'Transfer'), date,
+          },
+          {
+            user_id: user.id, type: 'income', transaction_subtype: sub,
+            category: 'transfer', amount,
+            wallet_id: to_wallet_id, transfer_id: transferId,
+            description: description || (sub === 'topup' ? 'Top Up diterima' : 'Transfer diterima'), date,
+          },
+        ]
         if (admin_fee > 0) {
           batchRows.push({
-            user_id:             user.id,
-            type:                'expense',
-            transaction_subtype: 'regular',
-            category:            'admin_fee',
-            amount:              admin_fee,
-            wallet_id:           from_wallet_id,
-            description:         `Biaya admin ${subtype === 'topup' ? 'top up' : 'transfer'}`,
-            date,
+            user_id: user.id, type: 'expense', transaction_subtype: 'regular',
+            category: 'admin_fee', amount: admin_fee,
+            wallet_id: from_wallet_id,
+            description: `Biaya admin ${sub === 'topup' ? 'top up' : 'transfer'}`, date,
           })
-          // Tidak perlu adjustBalance lagi — sudah termasuk di walletService.transfer
         }
-
         const { data: rows } = await transactionService.createBatch(batchRows)
         if (rows) setTransactions(prev => [...rows, ...prev])
-        toast.success(subtype === 'topup' ? 'Top Up berhasil!' : 'Transfer berhasil!')
+        toast.success(sub === 'topup' ? 'Top Up berhasil!' : 'Transfer berhasil!')
         return { data: rows }
       }
 
       // ── Saving Contribution ───────────────────────────
-      if (subtype === 'saving_contribution') {
+      if (sub === 'saving_contribution') {
         const { wallet_id, saving_goal_id, amount, description, date } = data
-
-        // Kurangi saldo wallet
         await walletService.adjustBalance(wallet_id, -amount)
         if (applyBalanceDelta) applyBalanceDelta(wallet_id, -amount)
-
-        // Tambah ke saving goal
-        const { supabase } = await import('@/lib/supabase')
-        await supabase.rpc
-          ? null
-          : null
-        // Direct update via savingsService
         const { savingsService: ss } = await import('@/services/index')
         await ss.addContribution(saving_goal_id, amount)
-
-        // Catat sebagai transaksi
         const txn = {
-          user_id:             user.id,
-          type:                'expense',
-          transaction_subtype: 'saving_contribution',
-          category:            'transfer',
-          amount,
-          wallet_id,
-          saving_goal_id,
-          description:         description || 'Saving contribution',
-          date,
+          user_id: user.id, type: 'expense', transaction_subtype: 'saving_contribution',
+          category: 'transfer', amount, wallet_id, saving_goal_id,
+          description: description || 'Saving contribution', date,
         }
         const { data: saved, error } = await transactionService.create(txn)
         if (error) throw error
@@ -230,21 +263,16 @@ export function useTransactions({ year, month, filters = {} } = {}) {
         return { data: saved }
       }
 
-      // ── Regular (income / expense) ────────────────────
+      // ── Regular ───────────────────────────────────────
       const { frequency, ...txnFields } = data
       const payload = { ...txnFields, user_id: user.id, transaction_subtype: 'regular' }
 
       if (data.is_recurring) {
         const { data: template } = await transactionService.createRecurringTemplate({
-          user_id:        user.id,
-          type:           data.type,
-          category:       data.category,
-          amount:         data.amount,
-          payment_method: data.payment_method,
-          description:    data.description,
-          frequency:      frequency || 'monthly',
-          next_due:       computeNextDue(data.date, frequency || 'monthly'),
-          is_active:      true,
+          user_id: user.id, type: data.type, category: data.category,
+          amount: data.amount, payment_method: data.payment_method,
+          description: data.description, frequency: frequency || 'monthly',
+          next_due: computeNextDue(data.date, frequency || 'monthly'), is_active: true,
         })
         if (template) payload.recurring_id = template.id
       }
@@ -257,11 +285,9 @@ export function useTransactions({ year, month, filters = {} } = {}) {
         await walletService.adjustBalance(data.wallet_id, delta)
         if (applyBalanceDelta) applyBalanceDelta(data.wallet_id, delta)
       }
-
       setTransactions(prev => [txn, ...prev])
       toast.success('Transaksi ditambahkan!')
       return { data: txn }
-
     } catch (e) {
       toast.error(e.message)
       return { error: e }
@@ -271,16 +297,16 @@ export function useTransactions({ year, month, filters = {} } = {}) {
   const updateTransaction = async (id, data, oldData, applyBalanceDelta) => {
     try {
       const { frequency, ...updateFields } = data
-      // Reverse saldo lama
-      if (oldData?.wallet_id && oldData.transaction_subtype === 'regular') {
+      // Reverse efek lama
+      if (oldData?.wallet_id && (oldData.transaction_subtype || 'regular') === 'regular') {
         const oldDelta = oldData.type === 'income' ? -oldData.amount : oldData.amount
         await walletService.adjustBalance(oldData.wallet_id, oldDelta)
         if (applyBalanceDelta) applyBalanceDelta(oldData.wallet_id, oldDelta)
       }
       const { data: txn, error } = await transactionService.update(id, updateFields)
       if (error) throw error
-      // Apply saldo baru
-      if (data.wallet_id && data.transaction_subtype === 'regular') {
+      // Apply efek baru
+      if (data.wallet_id && (data.transaction_subtype || 'regular') === 'regular') {
         const newDelta = data.type === 'income' ? data.amount : -data.amount
         await walletService.adjustBalance(data.wallet_id, newDelta)
         if (applyBalanceDelta) applyBalanceDelta(data.wallet_id, newDelta)
@@ -297,34 +323,21 @@ export function useTransactions({ year, month, filters = {} } = {}) {
   const deleteTransaction = async (id, applyBalanceDelta) => {
     try {
       const txn = transactions.find(t => t.id === id)
-      const { error } = await transactionService.delete(id)
-      if (error) throw error
-      if (txn?.wallet_id && txn.transaction_subtype === 'regular') {
-        const delta = txn.type === 'income' ? -txn.amount : txn.amount
-        await walletService.adjustBalance(txn.wallet_id, delta)
-        if (applyBalanceDelta) applyBalanceDelta(txn.wallet_id, delta)
-      }
-      setTransactions(prev => prev.filter(t => t.id !== id))
-      toast.success('Transaksi dihapus')
+        || await transactionService.getById(id).then(r => r.data)
+      await _reverseAndDelete(txn, applyBalanceDelta, setTransactions)
+      toast.success('Transaksi dihapus & saldo dikembalikan')
     } catch (e) {
-      toast.error(e.message)
+      toast.error(e.message || 'Gagal menghapus')
     }
   }
 
-  // Hanya hitung income/expense NYATA — exclude transfer & topup antar wallet
-  // Null subtype = data lama, dianggap 'regular'
+  // Hanya hitung income/expense NYATA (exclude transfer & topup)
   const isRealIncome  = t => t.type === 'income'  && (t.transaction_subtype || 'regular') !== 'transfer' && (t.transaction_subtype || 'regular') !== 'topup'
   const isRealExpense = t => t.type === 'expense' && (t.transaction_subtype || 'regular') !== 'transfer' && (t.transaction_subtype || 'regular') !== 'topup'
-
   const income  = transactions.filter(isRealIncome).reduce((s, t) => s + t.amount, 0)
   const expense = transactions.filter(isRealExpense).reduce((s, t) => s + t.amount, 0)
 
-  return {
-    transactions, loading, error,
-    income, expense, balance: income - expense,
-    addTransaction, updateTransaction, deleteTransaction,
-    refetch: fetchTransactions,
-  }
+  return { transactions, loading, error, income, expense, balance: income - expense, addTransaction, updateTransaction, deleteTransaction, refetch: fetchTransactions }
 }
 
 // ── useAllTransactions ────────────────────────────────────
@@ -399,45 +412,17 @@ export function useDebts() {
   const updateDebt = async (id, data) => { const r = await debtService.update(id, data); if (!r.error) { setDebts(p => p.map(x => x.id === id ? r.data : x)); toast.success('Updated!') } else toast.error(r.error.message); return r }
   const deleteDebt = async (id)       => { const r = await debtService.delete(id); if (!r.error) { setDebts(p => p.filter(x => x.id !== id)); toast.success('Deleted') } else toast.error(r.error.message) }
 
-  // ── Bayar hutang / terima piutang ─────────────────────────
-  const payDebt = async ({ debt_id, pay_amount, pay_mode, wallet_id, admin_fee = 0, description }) => {
+  // payDebt: ONLY updates paid_amount in DB, returns updated debt
+  // Wallet adjustment & transaction creation handled by caller (DebtsPage)
+  const payDebt = async ({ debt_id, pay_amount, pay_mode }) => {
     try {
       const debt = debts.find(d => d.id === debt_id)
       if (!debt) throw new Error('Debt not found')
-
-      const isPayable    = debt.debt_type === 'payable'
-      const isReceivable = debt.debt_type === 'receivable'
-      const today        = new Date().toISOString().split('T')[0]
-
-      // 1. Update paid_amount di DB (trigger otomatis update status)
       const r = pay_mode === 'full'
         ? await debtService.markFullyPaid(debt_id)
         : await debtService.recordPayment(debt_id, pay_amount)
       if (r.error) throw r.error
-
-      // Update local state
       setDebts(p => p.map(x => x.id === debt_id ? r.data : x))
-
-      // 2. Adjust wallet balance
-      if (wallet_id) {
-        // Payable: keluar dari wallet (bayar hutang) → delta negatif
-        // Receivable: masuk ke wallet (terima uang) → delta positif
-        const actualAmount = pay_mode === 'full'
-          ? (debt.amount - (debt.paid_amount || 0))
-          : pay_amount
-
-        const walletDelta = isPayable
-          ? -(actualAmount + admin_fee)
-          : actualAmount
-
-        await walletService.adjustBalance(wallet_id, walletDelta)
-
-        // Admin fee juga kurangi wallet kalau receivable (biaya transfer masuk)
-        // Biasanya yang nanggung admin fee adalah si pengirim, jadi untuk receivable tidak dikurangi
-
-        return { data: r.data, walletDelta, actualAmount, admin_fee }
-      }
-
       return { data: r.data, actualAmount: pay_mode === 'full' ? (debt.amount - (debt.paid_amount || 0)) : pay_amount }
     } catch (e) {
       toast.error(e.message)
@@ -483,7 +468,7 @@ export function useBudgets(year, month) {
   return { budgets, loading, upsertBudget, deleteBudget }
 }
 
-// ── useBudgetItems ───────────────────────────────────────
+// ── useBudgetItems ────────────────────────────────────────
 export function useBudgetItems(budgetId) {
   const { user } = useAuth()
   const [items, setItems]     = useState([])
@@ -507,13 +492,6 @@ export function useBudgetItems(budgetId) {
     return { data: item, error }
   }
 
-  const updateItem = async (id, data) => {
-    const { data: item, error } = await budgetItemService.update(id, data)
-    if (!error) setItems(p => p.map(x => x.id === id ? item : x))
-    else toast.error(error.message)
-    return { data: item, error }
-  }
-
   const toggleItem = async (id, currentState) => {
     const { data: item, error } = await budgetItemService.toggleCheck(id, currentState)
     if (!error) setItems(p => p.map(x => x.id === id ? item : x))
@@ -527,9 +505,8 @@ export function useBudgetItems(budgetId) {
   }
 
   const totalAllocated = items.reduce((s, i) => s + (i.amount || 0), 0)
-  const totalChecked   = items.filter(i => i.is_checked).reduce((s, i) => s + (i.amount || 0), 0)
 
-  return { items, loading, totalAllocated, totalChecked, addItem, updateItem, toggleItem, deleteItem, refetch: fetch }
+  return { items, loading, totalAllocated, addItem, toggleItem, deleteItem, refetch: fetch }
 }
 
 // ── useSavingsGoals ───────────────────────────────────────
@@ -548,10 +525,10 @@ export function useSavingsGoals() {
 
   useEffect(() => { fetch() }, [fetch])
 
-  const addGoal         = async (data)         => { const r = await savingsService.create({ ...data, user_id: user.id }); if (!r.error) { setGoals(p => [r.data, ...p]); toast.success('Goal created!') } else toast.error(r.error.message); return r }
-  const updateGoal      = async (id, data)     => { const r = await savingsService.update(id, data); if (!r.error) { setGoals(p => p.map(x => x.id === id ? r.data : x)); toast.success('Updated!') } else toast.error(r.error.message); return r }
-  const addContribution = async (id, amount)   => { const r = await savingsService.addContribution(id, amount); if (!r.error) { setGoals(p => p.map(x => x.id === id ? r.data : x)) } else toast.error(r.error.message); return r }
-  const deleteGoal      = async (id)           => { const r = await savingsService.delete(id); if (!r.error) { setGoals(p => p.filter(x => x.id !== id)); toast.success('Goal deleted') } else toast.error(r.error.message) }
+  const addGoal         = async (d)       => { const r = await savingsService.create({ ...d, user_id: user.id }); if (!r.error) { setGoals(p => [r.data, ...p]); toast.success('Goal created!') } else toast.error(r.error.message); return r }
+  const updateGoal      = async (id, d)   => { const r = await savingsService.update(id, d); if (!r.error) { setGoals(p => p.map(x => x.id === id ? r.data : x)); toast.success('Updated!') } else toast.error(r.error.message); return r }
+  const addContribution = async (id, amt) => { const r = await savingsService.addContribution(id, amt); if (!r.error) { setGoals(p => p.map(x => x.id === id ? r.data : x)) } else toast.error(r.error.message); return r }
+  const deleteGoal      = async (id)      => { const r = await savingsService.delete(id); if (!r.error) { setGoals(p => p.filter(x => x.id !== id)); toast.success('Goal deleted') } else toast.error(r.error.message) }
 
   return { goals, loading, addGoal, updateGoal, addContribution, deleteGoal, refetch: fetch }
 }
@@ -564,17 +541,17 @@ export function useRecurringTemplates() {
 
   useEffect(() => {
     if (!user) return
-    const fetchFn = async () => {
+    const fn = async () => {
       setLoading(true)
       const { data } = await transactionService.getRecurring(user.id)
       setTemplates(data || [])
       setLoading(false)
     }
-    fetchFn()
+    fn()
   }, [user])
 
-  const updateTemplate = async (id, data) => { const r = await transactionService.updateRecurringTemplate(id, data); if (!r.error) { setTemplates(p => p.map(x => x.id === id ? r.data : x)); toast.success('Updated!') } else toast.error(r.error.message) }
-  const deleteTemplate = async (id)       => { const r = await transactionService.deleteRecurringTemplate(id); if (!r.error) { setTemplates(p => p.filter(x => x.id !== id)); toast.success('Recurring deleted') } else toast.error(r.error.message) }
+  const updateTemplate = async (id, d) => { const r = await transactionService.updateRecurringTemplate(id, d); if (!r.error) { setTemplates(p => p.map(x => x.id === id ? r.data : x)); toast.success('Updated!') } else toast.error(r.error.message) }
+  const deleteTemplate = async (id)    => { const r = await transactionService.deleteRecurringTemplate(id);    if (!r.error) { setTemplates(p => p.filter(x => x.id !== id)); toast.success('Recurring deleted') } else toast.error(r.error.message) }
 
   return { templates, loading, updateTemplate, deleteTemplate }
 }
@@ -582,28 +559,19 @@ export function useRecurringTemplates() {
 // ── helpers ───────────────────────────────────────────────
 function computeNextDue(from, frequency) {
   const d = new Date(from)
-  const originalDay = d.getDate()  // simpan tanggal asal (misal 31)
-
+  const originalDay = d.getDate()
   if (frequency === 'weekly') {
     d.setDate(d.getDate() + 7)
   } else if (frequency === 'monthly') {
-    // Pindah ke bulan berikutnya
-    const nextMonth = d.getMonth() + 1
-    const nextYear  = nextMonth > 11 ? d.getFullYear() + 1 : d.getFullYear()
+    const nextMonth    = d.getMonth() + 1
+    const nextYear     = nextMonth > 11 ? d.getFullYear() + 1 : d.getFullYear()
     const clampedMonth = nextMonth % 12
-    // Cari hari terakhir bulan tujuan
-    const lastDayOfNextMonth = new Date(nextYear, clampedMonth + 1, 0).getDate()
-    // Pakai originalDay atau hari terakhir bulan (mana yang lebih kecil)
-    d.setFullYear(nextYear)
-    d.setMonth(clampedMonth)
-    d.setDate(Math.min(originalDay, lastDayOfNextMonth))
+    const lastDay      = new Date(nextYear, clampedMonth + 1, 0).getDate()
+    d.setFullYear(nextYear); d.setMonth(clampedMonth); d.setDate(Math.min(originalDay, lastDay))
   } else if (frequency === 'yearly') {
     const nextYear = d.getFullYear() + 1
-    // Handle 29 Feb → 28 Feb kalau tahun bukan leap year
-    const lastDayOfMonth = new Date(nextYear, d.getMonth() + 1, 0).getDate()
-    d.setFullYear(nextYear)
-    d.setDate(Math.min(originalDay, lastDayOfMonth))
+    const lastDay  = new Date(nextYear, d.getMonth() + 1, 0).getDate()
+    d.setFullYear(nextYear); d.setDate(Math.min(originalDay, lastDay))
   }
-
   return d.toISOString().split('T')[0]
 }

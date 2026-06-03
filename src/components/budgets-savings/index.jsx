@@ -5,6 +5,7 @@ import { Edit2, Trash2, Plus, ChevronDown, ChevronUp, Check, X } from 'lucide-re
 import { Button, ProgressBar, Badge } from '@/components/ui'
 import { formatCurrency, formatDate, daysUntil } from '@/utils'
 import { EXPENSE_CATEGORIES } from '@/constants/categories'
+import { useCustomCategories } from '@/hooks'
 import { useBudgetItems } from '@/hooks'
 
 // ═══════════════════════════════════════════════════════════════
@@ -13,6 +14,12 @@ import { useBudgetItems } from '@/hooks'
 
 export function BudgetForm({ onSubmit, defaultValues, loading }) {
   const now = new Date()
+  const { categories: customCats } = useCustomCategories()
+  const allExpenseCats = [
+    ...EXPENSE_CATEGORIES,
+    ...customCats.filter(c => c.type === 'expense').map(c => ({ id: c.id, label: c.name, icon: c.icon })),
+  ]
+
   const { register, handleSubmit, formState: { errors } } = useForm({
     defaultValues: {
       category: 'food_beverage',
@@ -37,7 +44,7 @@ export function BudgetForm({ onSubmit, defaultValues, loading }) {
           className="w-full px-3.5 py-2.5 rounded-xl border border-warmgray-200 dark:border-warmgray-700 bg-white/60 dark:bg-warmgray-900/40 text-sm text-[var(--text-primary)] focus:outline-none focus:border-sage-400"
           {...register('category', { required: true })}
         >
-          {EXPENSE_CATEGORIES.map(c => (
+          {allExpenseCats.map(c => (
             <option key={c.id} value={c.id}>{c.icon} {c.label}</option>
           ))}
         </select>
@@ -217,7 +224,10 @@ export function BudgetCard({ budget, spent = 0, onEdit, onDelete }) {
   const cat = EXPENSE_CATEGORIES.find(c => c.id === budget.category)
   const pct = Math.min((spent / budget.amount) * 100, 100)
   const remaining = budget.amount - spent
-  const variant = pct >= 100 ? 'overdue' : pct >= 80 ? 'warning' : 'paid'
+  // Over hanya kalau MELEBIHI (> 100%), bukan tepat 100%
+  const isOver    = pct > 100
+  const isWarning = pct >= 80 && pct <= 100
+  const variant   = isOver ? 'overdue' : isWarning ? 'warning' : 'paid'
 
   return (
     <motion.div
@@ -229,15 +239,16 @@ export function BudgetCard({ budget, spent = 0, onEdit, onDelete }) {
       {/* Header */}
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2.5">
-          <div className="w-9 h-9 rounded-xl flex items-center justify-center text-base" style={{ background: `${cat?.color}22` }}>
+          <div className="w-9 h-9 rounded-xl flex items-center justify-center text-base"
+            style={{ background: `${cat?.color || '#a3b18a'}22` }}>
             {cat?.icon || '📦'}
           </div>
           <div>
             <p className="text-sm font-medium text-[var(--text-primary)]">{cat?.label || budget.category}</p>
-            <p className="text-xs text-[var(--text-muted)]">{pct.toFixed(0)}% terpakai</p>
+            <p className="text-xs text-[var(--text-muted)]">{Math.min(pct, 100).toFixed(0)}% terpakai</p>
           </div>
         </div>
-        <Badge variant={variant}>{pct >= 100 ? 'Over!' : pct >= 80 ? 'Warning' : 'OK'}</Badge>
+        <Badge variant={variant}>{isOver ? 'Over!' : isWarning ? 'Warning' : 'OK'}</Badge>
       </div>
 
       {/* Progress */}
@@ -246,8 +257,12 @@ export function BudgetCard({ budget, spent = 0, onEdit, onDelete }) {
       {/* Numbers */}
       <div className="flex justify-between text-xs text-[var(--text-muted)] mb-1">
         <span>Dipakai: <span className="font-medium text-[var(--text-primary)]">{formatCurrency(spent)}</span></span>
-        <span className={remaining < 0 ? 'text-red-500 font-medium' : ''}>
-          {remaining < 0 ? `Over ${formatCurrency(Math.abs(remaining))}` : `Sisa ${formatCurrency(remaining)}`}
+        <span className={remaining < 0 ? 'text-red-500 font-medium' : remaining === 0 ? 'text-sage-600 dark:text-sage-300 font-medium' : ''}>
+          {remaining < 0
+            ? `Lebih ${formatCurrency(Math.abs(remaining))}`
+            : remaining === 0
+              ? 'Tepat terpenuhi ✓'
+              : `Sisa ${formatCurrency(remaining)}`}
         </span>
       </div>
       <p className="text-xs text-[var(--text-muted)]">Budget: {formatCurrency(budget.amount)}</p>

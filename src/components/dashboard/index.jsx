@@ -158,7 +158,7 @@ export function CategoryChart({ data = [] }) {
 }
 
 // ── Recent Transactions ───────────────────────────────────
-export function RecentTransactions({ transactions = [], loading }) {
+export function RecentTransactions({ transactions = [], loading, customCategories = [] }) {
   if (loading) {
     return (
       <Card>
@@ -187,7 +187,7 @@ export function RecentTransactions({ transactions = [], loading }) {
       ) : (
         <div className="space-y-1">
           {transactions.slice(0, 8).map(t => {
-            const cat = getCategoryById(t.category)
+            const cat = getCategoryById(t.category, customCategories) ?? { id: t.category, label: t.category?.replace(/_/g,' '), icon: '📦', color: '#a0a0a0' }
             return (
               <div key={t.id} className="flex items-center gap-3 py-2.5 px-1 rounded-xl hover:bg-white/30 dark:hover:bg-white/5 transition-colors">
                 <div

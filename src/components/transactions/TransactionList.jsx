@@ -6,8 +6,13 @@ import { Badge, EmptyState, Skeleton } from '@/components/ui'
 import { ArrowLeftRight } from 'lucide-react'
 
 // ── Transaction Item ──────────────────────────────────────
-export function TransactionItem({ transaction: t, onEdit, onDelete }) {
-  const cat = getCategoryById(t.category)
+export function TransactionItem({ transaction: t, onEdit, onDelete, customCategories = [] }) {
+  // Resolve category — cek built-in dulu, fallback ke custom
+  const cat = getCategoryById(t.category, customCategories)
+    ?? { id: t.category, label: t.category?.replace(/_/g, ' '), icon: '📦', color: '#a0a0a0' }
+
+  const sub = t.transaction_subtype || 'regular'
+  const isInternal = sub === 'transfer' || sub === 'topup' // perpindahan wallet
 
   return (
     <motion.div
@@ -20,39 +25,36 @@ export function TransactionItem({ transaction: t, onEdit, onDelete }) {
       {/* Category Icon */}
       <div
         className="w-9 h-9 rounded-xl flex items-center justify-center text-base flex-shrink-0"
-        style={{ background: `${cat?.color}22` }}
+        style={{ background: `${cat.color}22` }}
       >
-        {cat?.icon || '📦'}
+        {cat.icon}
       </div>
 
       {/* Info */}
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
           <p className="text-sm font-medium text-[var(--text-primary)] truncate">
-            {t.description || cat?.label || t.category}
+            {t.description || cat.label}
           </p>
-          {t.is_recurring && (
-            <RefreshCw size={11} className="text-warmgray-400 flex-shrink-0" />
-          )}
+          {t.is_recurring && <RefreshCw size={11} className="text-warmgray-400 flex-shrink-0" />}
+          {isInternal && <span className="text-[10px] text-warmgray-400 bg-warmgray-100 dark:bg-warmgray-800 px-1.5 py-0.5 rounded-md flex-shrink-0">internal</span>}
         </div>
         <p className="text-xs text-[var(--text-muted)] mt-0.5">
-          {formatDate(t.date, 'short')} · {t.payment_method?.replace('_', ' ') || '—'}
+          {formatDate(t.date, 'short')} · {cat.label}
+          {t.payment_method && ` · ${t.payment_method.replace('_', ' ')}`}
         </p>
       </div>
 
       {/* Amount */}
-      <div className="text-right">
-        <p className={`text-sm font-mono font-semibold ${t.type === 'income' ? 'amount-income' : 'amount-expense'}`}>
-          {t.type === 'income' ? '+' : '-'}
+      <div className="text-right flex-shrink-0">
+        <p className={`text-sm font-mono font-semibold ${isInternal ? 'text-warmgray-400' : t.type === 'income' ? 'amount-income' : 'amount-expense'}`}>
+          {isInternal ? '↔' : t.type === 'income' ? '+' : '-'}
           {t.amount.toLocaleString('id-ID')}
         </p>
-        <Badge variant={t.type} className="text-[10px] mt-0.5">
-          {cat?.label || t.category}
-        </Badge>
       </div>
 
       {/* Actions (hover) */}
-      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity ml-1">
+      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity ml-1 flex-shrink-0">
         <button
           onClick={() => onEdit(t)}
           className="p-1.5 rounded-lg hover:bg-sage-100 dark:hover:bg-sage-900/30 text-warmgray-400 hover:text-sage-600 transition-colors"
@@ -71,7 +73,7 @@ export function TransactionItem({ transaction: t, onEdit, onDelete }) {
 }
 
 // ── Transaction List ──────────────────────────────────────
-export function TransactionList({ transactions, onEdit, onDelete, loading }) {
+export function TransactionList({ transactions, onEdit, onDelete, loading, customCategories = [] }) {
   if (loading) {
     return (
       <div className="space-y-2">
@@ -93,15 +95,15 @@ export function TransactionList({ transactions, onEdit, onDelete, loading }) {
     return (
       <EmptyState
         icon={ArrowLeftRight}
-        title="No transactions yet"
-        description="Start tracking your finances by adding your first transaction."
+        title="Belum ada transaksi"
+        description="Tambahkan transaksi pertamamu."
       />
     )
   }
 
   // Group by date
   const grouped = transactions.reduce((acc, t) => {
-    const key = t.date.split('T')[0]
+    const key = (t.date || '').split('T')[0]
     if (!acc[key]) acc[key] = []
     acc[key].push(t)
     return acc
@@ -110,7 +112,7 @@ export function TransactionList({ transactions, onEdit, onDelete, loading }) {
   return (
     <AnimatePresence mode="popLayout">
       {Object.entries(grouped).map(([date, items]) => (
-        <motion.div key={date} layout className="mb-2">
+        <motion.div key={date} layout className="mb-1">
           <p className="text-xs font-medium text-[var(--text-muted)] px-3.5 py-2 uppercase tracking-wide">
             {formatDate(date, 'medium')}
           </p>
@@ -120,6 +122,7 @@ export function TransactionList({ transactions, onEdit, onDelete, loading }) {
               transaction={t}
               onEdit={onEdit}
               onDelete={onDelete}
+              customCategories={customCategories}
             />
           ))}
         </motion.div>
